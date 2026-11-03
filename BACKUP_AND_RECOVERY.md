@@ -210,7 +210,85 @@ Set-Location C:\Projects\SkillSync
 
 The script authenticates and validates the archive, then verifies each restored file hash. It does not replace the live `.env`. On a different computer, first recover the source to a separate project directory; restore configuration to a separate recovery directory; compare filenames with that project's `.env.example`; and manually copy only the needed values into a newly created, access-controlled `.env` for that recovered project. Keep the recovered `.env` out of Git and do not overwrite an existing environment file without first preserving it and confirming the target project and database. Do not copy `DATABASE_URL` from an old environment unless it is intentionally correct for the recovered machine.
 
-Configuration files are backed up separately because the source repository and source ZIP intentionally exclude secrets, while a database backup covers records and schema—not runtime secrets. Upload archives, in turn, contain user files but no database records or configuration. Each component therefore requires its own access controls and validated restore procedure. No backup scheduling or retention automation is implemented.
+Configuration files are backed up separately because the source repository and source ZIP intentionally exclude secrets, while a database backup covers records and schema—not runtime secrets. Upload archives, in turn, contain user files but no database records or configuration. Each component therefore requires its own access controls and validated restore procedure.
+
+## Coordinated backups, status, retention, and scheduling
+
+The coordinator writes each run under `<BackupRoot>\runs\<run-id>\`, with separate `source`, `database`, `uploads`, and `configuration` directories. The default root is `C:\Projects\SkillSync-backups\automated`; choose a protected destination outside the project when running it elsewhere. Each run has machine-readable `run.json` metadata. Per-component results include file counts, sizes, artifact hashes, and the component script's validation result. Logs and attempt status are stored separately under `%LOCALAPPDATA%\SkillSync\backup-status`; they contain status and safe error summaries, not configuration values or database records.
+
+Run all components interactively so the configuration script can prompt for its encryption passphrase:
+
+```powershell
+Set-Location C:\Projects\SkillSync
+.\scripts\run-backup.ps1 -BackupRoot D:\ProtectedBackups\SkillSync\automated
+```
+
+The coordinator reports a run as `complete` only when all four components succeed and their artifacts are recorded. In noninteractive mode it deliberately does not request or store a configuration passphrase; configuration is marked `manual_required`, the run is `partial`, and the command exits nonzero:
+
+```powershell
+.\scripts\run-backup.ps1 -BackupRoot D:\ProtectedBackups\SkillSync\automated -NonInteractive
+```
+
+The noninteractive form is appropriate for source, database, and upload automation, but it does not create a complete four-component recovery point. The configuration backup still requires a separate interactive operation. A nonzero result must be investigated; do not treat a partial or failed run as a successful backup.
+
+Check the latest attempt and the existing run artifacts without displaying their contents:
+
+```powershell
+.\scripts\backup-status.ps1 -BackupRoot D:\ProtectedBackups\SkillSync\automated
+```
+
+Status counts a run as verified complete only after checking each component's artifact paths, sizes, and SHA-256 hashes. It also checks the artifacts for components marked successful in the latest attempt, even if the overall run is partial. The status command reads local attempt history and the selected backup root; an unavailable destination is reported as such, not as a successful backup.
+
+### Optional Windows Task Scheduler setup
+
+The task setup script supports a preview that does not register anything:
+
+```powershell
+.\scripts\install-backup-schedule.ps1 `
+  -BackupRoot D:\ProtectedBackups\SkillSync\automated `
+  -DailyTime '02:00' `
+  -WhatIf
+```
+
+To actually register the task, rerun without `-WhatIf`. Registration is an explicit administrator/operator action and is not performed by this documentation. The task runs as the current user only while that user is logged in, starts missed work when possible, and skips overlapping runs. It invokes the noninteractive coordinator, so configuration is marked `manual_required` and scheduled runs remain partial until a secure unattended configuration-encryption method is designed and tested. There is no unattended passphrase or plaintext fallback.
+
+For an actual scheduler registration test without running a backup, give the test task a unique name, choose a time safely in the future, and use `-TestAction`. That action only starts PowerShell and exits successfully. Remove the named test task afterward:
+
+```powershell
+$testTask = "SkillSync scheduler test $([guid]::NewGuid().ToString('N'))"
+$testTime = (Get-Date).AddMinutes(10).ToString('HH:mm')
+.\scripts\install-backup-schedule.ps1 `
+  -BackupRoot (Join-Path $env:TEMP $testTask) `
+  -DailyTime $testTime `
+  -TaskName $testTask `
+  -TestAction
+Get-ScheduledTask -TaskName $testTask -TaskPath '\'
+.\scripts\uninstall-backup-schedule.ps1 -TaskName $testTask -ConfirmRemoval
+```
+
+The install and uninstall scripts default to the production task name, but accept an exact task name for isolated tests; wildcard names and task paths are rejected. Do not use `-TestAction` with the production task name.
+
+Preview retention before any deletion:
+
+```powershell
+.\scripts\cleanup-backups.ps1 `
+  -BackupRoot D:\ProtectedBackups\SkillSync\automated `
+  -DryRun
+```
+
+Retention considers only complete runs whose metadata and every recorded artifact pass validation. It keeps the newest run in each of the latest 7 daily, 4 weekly, and 3 monthly calendar buckets, as well as the latest complete run. Partial, failed, and unrecognized directories are not deletion candidates. A run marked `running`, malformed metadata, or a complete run with missing or corrupted artifacts stops cleanup without deleting candidates. Backup roots and run trees containing symbolic links or junctions are rejected. If and only if the preview is understood and the operator explicitly authorizes deletion, the same policy can be applied with:
+
+```powershell
+.\scripts\cleanup-backups.ps1 `
+  -BackupRoot D:\ProtectedBackups\SkillSync\automated `
+  -ConfirmDeletion
+```
+
+The deletion option is intentionally explicit. Do not run it until the backup root is available, metadata validates, and the previewed candidates are acceptable. Retention does not delete incomplete runs, so those may require separate, careful manual review. The scripts use an operating-system mutex, not a backup file or lock file that could be mistaken for a successful backup. No cleanup is run automatically.
+
+### Storage and operational limits
+
+The source ZIP and configuration archive have their own protection mechanisms, but the SQLite and uploaded-file archives are not encrypted by their scripts. Encryption-at-rest for the backup destination has not been verified. Store all backup components on access-controlled, encrypted storage and keep an independent copy on a different device or approved storage service. The default sibling folder on the same machine is not an independent disaster-recovery copy. Do not put database, upload, run, or configuration backups in GitHub or in the source archive.
 
 ## Verify recovery
 
