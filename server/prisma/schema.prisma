@@ -1,0 +1,323 @@
+// This is your Prisma schema file
+// SkillSync - Campus Internship & Skills Matching Platform
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+// Note: SQLite does not support native enums; using String fields with app-level validation.
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  role        String   @default("STUDENT")  // STUDENT | EMPLOYER | ADMIN
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  studentProfile      StudentProfile?
+  employerProfile     EmployerProfile?
+  passwordResetTokens PasswordResetToken[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  @@index([email])
+  @@index([role])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([used])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model StudentProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  firstName     String
+  lastName      String
+  phone         String?
+  university    String?
+  faculty       String?
+  degree        String?
+  yearOfStudy   Int?
+  gpa           Float?
+  bio           String?
+  linkedIn      String?
+  github        String?
+  portfolioUrl  String?
+  avatarUrl     String?
+  city          String?
+  country       String   @default("South Africa")
+  readinessScore Float   @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  studentSkills   StudentSkill[]
+  applications    Application[]
+  recommendations Recommendation[]
+  readinessMetric StudentReadinessMetric?
+
+  @@index([university])
+  @@index([city])
+  @@index([readinessScore])
+  @@index([createdAt])
+  @@map("student_profiles")
+}
+
+model EmployerProfile {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  companyName String
+  industry    String?
+  website     String?
+  logoUrl     String?
+  description String?
+  city        String?
+  country     String   @default("South Africa")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  internships Internship[]
+
+  @@index([companyName])
+  @@index([industry])
+  @@index([city])
+  @@index([createdAt])
+  @@map("employer_profiles")
+}
+
+model Skill {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  category    String   @default("OTHER")  // PROGRAMMING | FRAMEWORK | DATABASE | CLOUD | DEVOPS | DESIGN | SOFT_SKILL | LANGUAGE | TOOL | OTHER
+  description String?
+  iconUrl     String?
+  createdAt   DateTime      @default(now())
+
+  studentSkills      StudentSkill[]
+  internshipSkills   InternshipSkill[]
+  recommendations    Recommendation[]
+
+  @@index([category])
+  @@index([name])
+  @@map("skills")
+}
+
+model StudentSkill {
+  id               String           @id @default(cuid())
+  studentProfileId String
+  skillId          String
+  proficiency      String           @default("BEGINNER")  // BEGINNER | ELEMENTARY | INTERMEDIATE | ADVANCED | EXPERT
+  yearsExperience  Float?
+  certificationUrl String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  skill          Skill          @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([studentProfileId, skillId])
+  @@index([studentProfileId])
+  @@index([skillId])
+  @@index([proficiency])
+  @@map("student_skills")
+}
+
+model Internship {
+  id               String           @id @default(cuid())
+  employerProfileId String
+  title            String
+  description      String
+  responsibilities String?
+  requirements     String?
+  location         String?
+  isRemote         Boolean          @default(false)
+  stipend          Float?
+  currency         String           @default("ZAR")
+  durationMonths   Int?
+  startDate        DateTime?
+  applicationDeadline DateTime?
+  status           String           @default("ACTIVE")  // DRAFT | ACTIVE | CLOSED | FILLED
+  industry         String?
+  tags             String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  employer         EmployerProfile   @relation(fields: [employerProfileId], references: [id], onDelete: Cascade)
+  requiredSkills   InternshipSkill[]
+  applications     Application[]
+
+  @@index([employerProfileId])
+  @@index([status])
+  @@index([industry])
+  @@index([isRemote])
+  @@index([applicationDeadline])
+  @@index([createdAt])
+  @@map("internships")
+}
+
+model InternshipSkill {
+  id            String @id @default(cuid())
+  internshipId  String
+  skillId       String
+  importance    Int    @default(3) // 1=nice-to-have, 3=preferred, 5=required
+  minimumLevel  String           @default("BEGINNER")
+
+  internship Internship @relation(fields: [internshipId], references: [id], onDelete: Cascade)
+  skill      Skill      @relation(fields: [skillId], references: [id], onDelete: Cascade)
+
+  @@unique([internshipId, skillId])
+  @@index([internshipId])
+  @@index([skillId])
+  @@index([importance])
+  @@map("internship_skills")
+}
+
+model Application {
+  id               String            @id @default(cuid())
+  studentProfileId String
+  internshipId     String
+  status           String            @default("PENDING")  // PENDING | UNDER_REVIEW | SHORTLISTED | INTERVIEW_SCHEDULED | OFFERED | ACCEPTED | REJECTED | WITHDRAWN
+  matchScore       Float?            // Application-time match snapshot; null when requirements cannot be scored.
+  coverLetter      String?
+  resumeUrl        String?
+  notes            String?
+  appliedAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  internship     Internship     @relation(fields: [internshipId], references: [id], onDelete: Cascade)
+  matchMetric    InternshipMatchMetric?
+
+  @@unique([studentProfileId, internshipId])
+  @@index([studentProfileId])
+  @@index([internshipId])
+  @@index([status])
+  @@index([matchScore])
+  @@index([appliedAt])
+  @@map("applications")
+}
+
+model Recommendation {
+  id               String   @id @default(cuid())
+  studentProfileId String
+  type             String   // "skill_gap", "course", "certification", "internship"
+  title            String
+  description      String
+  resourceUrl      String?
+  priority         Int      @default(1) // 1=low, 2=medium, 3=high
+  skillId          String?
+  isCompleted      Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+  skill          Skill?          @relation(fields: [skillId], references: [id], onDelete: SetNull)
+
+  @@index([studentProfileId])
+  @@index([createdAt])
+  @@map("recommendations")
+}
+
+model Notification {
+  id                String   @id @default(cuid())
+  userId            String
+  type              String   // "application_update", "match_found", "message", "system"
+  title             String
+  message           String
+  relatedEntityType String?  // "application", "internship", "recommendation"
+  relatedEntityId   String?
+  isRead            Boolean  @default(false)
+  actionUrl         String?
+  createdAt         DateTime @default(now())
+  readAt            DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  action          String   // "create", "update", "delete", "login", "logout"
+  entityType      String   // "user", "application", "internship", "student_profile", etc.
+  entityId        String
+  changes         String?  // JSON string of before/after changes
+  ipAddress       String?
+  userAgent       String?
+  status          String   @default("SUCCESS") // "SUCCESS", "FAILURE"
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entityType])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─── View/Report Models ──────────────────────────────────────────────────────
+// These are logical models for reporting and analytics
+
+model StudentReadinessMetric {
+  id               String   @id @default(cuid())
+  studentProfileId String   @unique
+  technicalScore   Float    @default(0)  // 0-100
+  softSkillScore   Float    @default(0)  // 0-100
+  experienceScore  Float    @default(0)  // 0-100
+  overallScore     Float    @default(0)  // 0-100
+  skillGapCount    Int      @default(0)
+  lastCalculatedAt DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  studentProfile StudentProfile @relation(fields: [studentProfileId], references: [id], onDelete: Cascade)
+
+  @@index([overallScore])
+  @@index([updatedAt])
+  @@map("student_readiness_metrics")
+}
+
+model InternshipMatchMetric {
+  id            String   @id @default(cuid())
+  applicationId String   @unique
+  matchScore    Float    @default(0)  // 0-100
+  skillMatch    Float    @default(0)  // Percentage of required skills matched
+  experienceMatch Float  @default(0)  // Based on experience level
+  educationMatch Float   @default(0)  // Based on university/degree
+  locationMatch  Float   @default(0)  // 0 if remote, partial/full if location matches
+  overallMatch   Float   @default(0)  // Final composite score
+  calculatedAt   DateTime @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId])
+  @@index([overallMatch])
+  @@map("internship_match_metrics")
+}
