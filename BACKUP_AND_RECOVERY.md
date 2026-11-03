@@ -148,9 +148,69 @@ To use a restored database later, an administrator must deliberately configure t
 
 Prisma migrations describe schema changes; they do not contain database records and cannot recreate users, applications, or other saved data. A successful backup is not proven until it has been restored to a separate destination and validated. Repeat restoration tests periodically and after backup-tool changes. Restore tests should compare non-sensitive validation metadata, never display actual records, and must not overwrite the live database.
 
-## Uploaded-file recovery (separate procedure)
+## Uploaded-file backup and restoration
 
-Uploaded avatar and logo files are stored under `server/uploads/avatars` and are excluded from this source archive. Back up that directory separately to protected storage and restore its contents to the same relative path in the recovered server. The database may contain paths to these files, so restore the corresponding database and upload backup from a consistent recovery point. The uploads folder was empty when this backup foundation was prepared; future uploads need their own backup.
+The application accepts JPEG, PNG, and WebP profile images up to 5 MB. It writes student avatars and employer logos locally under `server/uploads/avatars`; both are served through `/uploads`. The upload archive preserves paths relative to the project, including the `server/uploads/avatars` directory. The script discovers upload directories and creates a valid manifest-only archive if they are empty.
+
+Uploads and the SQLite database are separate recovery components: the database stores the profile path references while the archive stores file bytes. Back up both at compatible recovery points. Upload archives are ordinary ZIP files and are **not encrypted by this script**; uploaded images may identify users, so store the archives only on access-controlled protected storage.
+
+The upload manifest is inside the ZIP and records relative paths, file sizes, and SHA-256 hashes. The script validates the ZIP and manifest before publishing a timestamped archive. The default destination is outside the project at `C:\Projects\SkillSync-backups\uploads`.
+
+Create an upload backup from PowerShell:
+
+```powershell
+Set-Location C:\Projects\SkillSync
+.\scripts\backup-uploads.ps1
+```
+
+Or specify a protected destination outside the project:
+
+```powershell
+.\scripts\backup-uploads.ps1 -DestinationDirectory D:\ProtectedBackups\SkillSync\Uploads
+```
+
+Restore into a new destination directory (it must not already exist):
+
+```powershell
+Set-Location C:\Projects\SkillSync
+.\scripts\restore-uploads.ps1 `
+  -BackupPath D:\ProtectedBackups\SkillSync\Uploads\skillsync-uploads-<timestamp>.zip `
+  -DestinationPath D:\SkillSync-Restore
+```
+
+The restored tree is under `D:\SkillSync-Restore\server\uploads\...`. The restore script checks archive integrity and manifest hashes before extracting to a staging directory and moving it to the new destination. It will not overwrite a destination and does not restore into the live application. After independently reviewing the recovered files and database together, an administrator can use an application recovery copy and manually place the upload tree at its intended `server\uploads` location while preserving the original data.
+
+## Configuration backup and restoration
+
+Environment files contain database connection details, JWT signing secrets, and other private settings. The configuration backup script discovers actual `.env` and `.env.*` files (excluding `.env.example` templates) while skipping dependencies and build output. In this checkout, the only actual environment file found was `server/.env`; there is no client environment file. Ordinary runtime configuration and code such as `server/prisma/schema.prisma`, server startup/auth code, package manifests, and client build configuration are tracked in Git and included in the source backup.
+
+Configuration backups use portable **AES-256-GCM authenticated encryption**. A key is derived from a passphrase using Node.js `scrypt` (N=32768, r=8, p=1) with a fresh random salt and nonce. The encrypted archive and its manifest are validated before the backup is published. The ZIP is created in memory; no plaintext configuration archive is written to disk. The script prompts securely for a passphrase twice, requires at least 16 UTF-8 bytes, and never saves it. Use a unique strong passphrase and retain it in a trusted password manager: **without that passphrase, the backup cannot be recovered**. The format is portable to another computer with Node.js and Python available; Windows DPAPI is not used.
+
+The encrypted configuration archive is stored separately from source, database, and upload backups. Its default destination is `C:\Projects\SkillSync-backups\configuration`; specify another protected destination outside the project when needed:
+
+```powershell
+Set-Location C:\Projects\SkillSync
+.\scripts\backup-config.ps1
+```
+
+```powershell
+.\scripts\backup-config.ps1 -DestinationDirectory D:\ProtectedBackups\SkillSync\Configuration
+```
+
+The encrypted archive contains the environment files and an encrypted manifest with relative filenames and validation metadata, but no configuration values are printed. Never commit `.sscfg` archives or actual `.env` files to GitHub. Encryption does not make it safe to publish the archive; protect it from deletion, unauthorized access, and passphrase loss.
+
+Restore the encrypted configuration only into a new, separate directory. The script prompts for the passphrase and refuses an existing destination:
+
+```powershell
+Set-Location C:\Projects\SkillSync
+.\scripts\restore-config.ps1 `
+  -BackupPath D:\ProtectedBackups\SkillSync\Configuration\skillsync-config-<timestamp>.sscfg `
+  -DestinationPath D:\SkillSync-Recovery-Config
+```
+
+The script authenticates and validates the archive, then verifies each restored file hash. It does not replace the live `.env`. On a different computer, first recover the source to a separate project directory; restore configuration to a separate recovery directory; compare filenames with that project's `.env.example`; and manually copy only the needed values into a newly created, access-controlled `.env` for that recovered project. Keep the recovered `.env` out of Git and do not overwrite an existing environment file without first preserving it and confirming the target project and database. Do not copy `DATABASE_URL` from an old environment unless it is intentionally correct for the recovered machine.
+
+Configuration files are backed up separately because the source repository and source ZIP intentionally exclude secrets, while a database backup covers records and schema—not runtime secrets. Upload archives, in turn, contain user files but no database records or configuration. Each component therefore requires its own access controls and validated restore procedure. No backup scheduling or retention automation is implemented.
 
 ## Verify recovery
 

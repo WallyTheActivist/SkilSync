@@ -28,6 +28,8 @@
 *.backup
 *.backup.*
 skillsync-source-*.zip
+skillsync-uploads-*.zip
+*.sscfg
 
 # Regenerable build and test output
 **/dist/
