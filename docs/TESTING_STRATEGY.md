@@ -11,7 +11,7 @@ This plan adds repeatable coverage around the existing SkillSync React/Vite clie
 | Server unit | Node.js built-in `node:test` and `node:assert/strict` | Password hash verification and matching/readiness/gap/recommendation calculations. Prisma is stubbed for matching unit cases. |
 | Server HTTP integration | Node `fetch` against in-memory Express apps | Security middleware, authentication, registration/profile validation, and application cases. Some controller cases use Prisma delegate stubs; these are not database tests. |
 | Database integration | Prisma Client against an explicitly configured disposable SQLite database | Opt-in tests cover registration persistence/normalization and user/profile/skill/internship/application relations with persisted matching. They are skipped unless `SKILLSYNC_TEST_DATABASE_URL` is set. |
-| Client unit/component | Node.js built-in `node:test` for `.mjs` helpers | Identity-field normalization, password policy, profile payloads, auth requests, validation errors, and employer profile payloads. No component or browser test runner is installed. |
+| Client unit/component | Node.js built-in `node:test` for `.mjs` helpers | Identity-field normalization, shared password policy, profile payloads, auth requests, validation errors, and employer profile payloads. No component or browser test runner is installed. |
 | System / end-to-end | Documented procedures | Requires a running client/API and synthetic test data. All such cases are pending until executed and recorded. |
 
 ## Repository-Specific Constraints
@@ -62,7 +62,7 @@ There is no automated browser/component test runner; UI behavior has not been br
 - Exercise deterministic algorithms and policy helpers independently from Express and persistence.
 - Current matching unit tests stub only the Prisma delegate calls and assert algorithm outputs against fixed synthetic skill records.
 - Keep expected values tied to the existing matching formula. When the product formula changes, update the formula specification and test cases together.
-- Password hash behavior is directly tested. Route password-policy validation currently has HTTP-level coverage; a future extraction into a pure policy function is not required solely to claim the existing route is unit tested.
+- Password complexity and bcrypt length boundaries are tested in the shared client helper and backend policy helper. In-memory HTTP tests cover registration for student and employer roles and password reset rejection; database-backed registration persistence remains opt-in.
 - Client identity helper tests cover trimmed international names, invalid names, optional university omission, and malformed supplied university values.
 
 ### Integration

@@ -4,6 +4,7 @@ import prisma from '../config/database';
 import { signToken } from '../utils/jwt';
 import { clearAuthCookie, setAuthCookie } from '../utils/authCookie';
 import { hashPassword, verifyPassword } from '../utils/password';
+import { getPasswordValidationError } from '../utils/passwordPolicy';
 import { createError } from '../middleware/errorHandler';
 
 const hasLetter = /\p{L}/u;
@@ -54,10 +55,12 @@ export const register = async (req: Request, res: Response, next: NextFunction):
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
     const normalizedFirstName = validatePersonName(firstName, 'First name');
     const normalizedLastName = validatePersonName(lastName, 'Last name');
-    const normalizedUniversity = role === 'EMPLOYER' ? '' : validateInstitutionName(university, 'University');
+    const normalizedUniversity = role === 'EMPLOYER' || university === undefined
+      ? ''
+      : validateInstitutionName(university, 'University');
     const normalizedCompanyName = role === 'EMPLOYER' ? validateInstitutionName(companyName, 'Company name') : '';
 
-    if (!normalizedEmail || !password) {
+    if (!normalizedEmail || typeof password !== 'string') {
       return next(createError('Email and password are required.', 400));
     }
 
@@ -66,8 +69,9 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return next(createError('Please provide a valid email address.', 400));
     }
 
-    if (password.length < 12 || password.length > 72 || Buffer.byteLength(password, 'utf8') > 72) {
-      return next(createError('Password must be 12-72 characters and no more than 72 UTF-8 bytes.', 400));
+    const passwordError = getPasswordValidationError(password);
+    if (passwordError) {
+      return next(createError(passwordError, 400));
     }
 
     const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } });
@@ -243,9 +247,10 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
 export const resetPassword = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { token, password } = req.body;
-    if (!token || !password) return next(createError('Token and new password are required.', 400));
-    if (password.length < 12 || password.length > 72 || Buffer.byteLength(password, 'utf8') > 72) {
-      return next(createError('Password must be 12-72 characters and no more than 72 UTF-8 bytes.', 400));
+    if (!token || typeof password !== 'string') return next(createError('Token and new password are required.', 400));
+    const passwordError = getPasswordValidationError(password);
+    if (passwordError) {
+      return next(createError(passwordError, 400));
     }
 
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex');

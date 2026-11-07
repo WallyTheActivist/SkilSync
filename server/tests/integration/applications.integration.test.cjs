@@ -181,8 +181,14 @@ const updateApplicationStatus = ({
   applicationId = 'application-test-001',
   status = 'UNDER_REVIEW',
   notes,
+  role = 'EMPLOYER',
 } = {}) => {
-  const token = signToken({ userId: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' });
+  const isEmployer = role === 'EMPLOYER';
+  const token = signToken({
+    userId: isEmployer ? 'employer-user-test-001' : 'student-user-test-001',
+    email: isEmployer ? 'employer@skillsync.test' : 'amara@skillsync.test',
+    role,
+  });
   return fetch(`${baseUrl}/employer/applications/${applicationId}/status`, {
     method: 'PATCH',
     headers: {
@@ -413,6 +419,142 @@ test('employer can advance an application to a valid next status', async (t) => 
   assert.equal(response.status, 200);
   assert.equal(body.data.status, 'UNDER_REVIEW');
   assert.deepEqual(updated.data, { status: 'UNDER_REVIEW' });
+});
+
+test('employer can reject an application that belongs to their internship', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.application, 'findUnique', async ({ where }) => ({
+    id: where.id,
+    status: 'PENDING',
+    internship: { employerProfileId: 'employer-profile-test-001' },
+  }));
+
+  let updated;
+  mockMethod(t, prisma.application, 'update', async (args) => {
+    updated = args;
+    return { id: args.where.id, status: args.data.status };
+  });
+
+  const { response, body } = await updateApplicationStatus({ status: 'REJECTED' });
+
+  assert.equal(response.status, 200);
+  assert.equal(body.data.status, 'REJECTED');
+  assert.deepEqual(updated.where, { id: 'application-test-001' });
+  assert.deepEqual(updated.data, { status: 'REJECTED' });
+});
+
+test('employer can accept an application that belongs to their internship', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.application, 'findUnique', async () => ({
+    id: 'application-test-001',
+    status: 'PENDING',
+    internship: { employerProfileId: 'employer-profile-test-001' },
+  }));
+
+  let updated;
+  mockMethod(t, prisma.application, 'update', async (args) => {
+    updated = args;
+    return { id: 'application-test-001', status: args.data.status };
+  });
+
+  const { response, body } = await updateApplicationStatus({ status: 'ACCEPTED' });
+
+  assert.equal(response.status, 200);
+  assert.equal(body.data.status, 'ACCEPTED');
+  assert.deepEqual(updated.where, { id: 'application-test-001' });
+});
+
+test('employer cannot update an application belonging to another employer', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.application, 'findUnique', async () => ({
+    id: 'application-test-001',
+    status: 'PENDING',
+    internship: { employerProfileId: 'another-employer-profile' },
+  }));
+
+  let updateCalled = false;
+  mockMethod(t, prisma.application, 'update', async () => {
+    updateCalled = true;
+    return {};
+  });
+
+  const { response, body } = await updateApplicationStatus({ status: 'REJECTED' });
+
+  assert.equal(response.status, 403);
+  assert.match(body.message, /not authorized/i);
+  assert.equal(updateCalled, false);
+});
+
+test('student cannot update application status through the employer endpoint', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'student-user-test-001', email: 'amara@skillsync.test', role: 'STUDENT' }));
+
+  let applicationLookupCalled = false;
+  mockMethod(t, prisma.application, 'findUnique', async () => {
+    applicationLookupCalled = true;
+    return null;
+  });
+
+  const { response, body } = await updateApplicationStatus({ status: 'REJECTED', role: 'STUDENT' });
+
+  assert.equal(response.status, 403);
+  assert.match(body.message, /permission/i);
+  assert.equal(applicationLookupCalled, false);
+});
+
+test('unauthenticated requests cannot update application status', async () => {
+  const response = await fetch(`${baseUrl}/employer/applications/application-test-001/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status: 'REJECTED' }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 401);
+  assert.match(body.message, /authentication/i);
+});
+
+test('employer endpoint rejects invalid application statuses', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+
+  let applicationLookupCalled = false;
+  mockMethod(t, prisma.application, 'findUnique', async () => {
+    applicationLookupCalled = true;
+    return null;
+  });
+
+  const { response, body } = await updateApplicationStatus({ status: 'Rejected' });
+
+  assert.equal(response.status, 400);
+  assert.match(body.message, /invalid request/i);
+  assert.equal(applicationLookupCalled, false);
+});
+
+test('updating one application does not modify another application', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  const applications = new Map([
+    ['application-test-001', { id: 'application-test-001', status: 'PENDING', internship: { employerProfileId: 'employer-profile-test-001' } }],
+    ['application-test-002', { id: 'application-test-002', status: 'PENDING', internship: { employerProfileId: 'employer-profile-test-001' } }],
+  ]);
+  mockMethod(t, prisma.application, 'findUnique', async ({ where }) => applications.get(where.id) ?? null);
+  mockMethod(t, prisma.application, 'update', async ({ where, data }) => {
+    const application = applications.get(where.id);
+    application.status = data.status;
+    return application;
+  });
+
+  const { response, body } = await updateApplicationStatus({
+    applicationId: 'application-test-001',
+    status: 'REJECTED',
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(body.data.id, 'application-test-001');
+  assert.equal(applications.get('application-test-001').status, 'REJECTED');
+  assert.equal(applications.get('application-test-002').status, 'PENDING');
 });
 
 test('employer cannot perform an invalid status transition', async (t) => {

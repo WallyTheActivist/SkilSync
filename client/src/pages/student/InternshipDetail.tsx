@@ -13,6 +13,7 @@ import { Badge } from '../../components/ui/Badge';
 import { Modal } from '../../components/ui/Modal';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import type { Internship, MatchScoreResult } from '../../types';
+import { loadInternshipDetail } from '../../utils/internshipDetailLoader.mjs';
 import {
   formatCurrency, formatDate, getMatchScoreColor, getMatchScoreBg,
   PROFICIENCY_LABELS, SKILL_CATEGORY_COLORS, SKILL_CATEGORY_LABELS,
@@ -32,17 +33,28 @@ export const InternshipDetail: React.FC = () => {
 
   useEffect(() => {
     if (!id) return;
-    Promise.all([
-      internshipsApi.getById(id),
-      internshipsApi.getMatchScore(id),
-    ]).then(([intRes, matchRes]) => {
-      setInternship(intRes.data.data);
-      setMatchScore(matchRes.data.data);
+    let isCurrentRequest = true;
+    setIsLoading(true);
+    setInternship(null);
+    setMatchScore(null);
+
+    loadInternshipDetail(id, internshipsApi).then(({ internship: loadedInternship, matchScore: loadedMatchScore, matchScoreFailed }) => {
+      if (!isCurrentRequest) return;
+      setInternship(loadedInternship);
+      setMatchScore(loadedMatchScore);
+      if (matchScoreFailed) toast.error('Failed to load internship match score.');
     }).catch(() => {
+      if (!isCurrentRequest) return;
       toast.error('Failed to load internship.');
       navigate('/internships');
-    }).finally(() => setIsLoading(false));
-  }, [id]);
+    }).finally(() => {
+      if (isCurrentRequest) setIsLoading(false);
+    });
+
+    return () => {
+      isCurrentRequest = false;
+    };
+  }, [id, navigate]);
 
   const handleApply = async () => {
     if (!id) return;

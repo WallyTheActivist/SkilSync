@@ -9,9 +9,11 @@ import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { APPLICATION_STATUS_LABELS, APPLICATION_STATUS_COLORS, formatDate, getInitials } from '../../utils/helpers';
+import { getApplicationStatusUpdateError, persistApplicationStatus } from '../../utils/applicationStatusUpdate.mjs';
+import type { ApplicationStatus } from '../../types';
 import clsx from 'clsx';
 
-const STATUS_OPTIONS = ['PENDING', 'UNDER_REVIEW', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'ACCEPTED', 'REJECTED'];
+const STATUS_OPTIONS: ApplicationStatus[] = ['PENDING', 'UNDER_REVIEW', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'ACCEPTED', 'REJECTED'];
 
 const Applicants: React.FC = () => {
   const navigate = useNavigate();
@@ -45,14 +47,18 @@ const Applicants: React.FC = () => {
       .finally(() => setLoading(false));
   }, [selectedInternship, statusFilter]);
 
-  const handleStatusUpdate = async (appId: string, status: string) => {
+  const handleStatusUpdate = async (appId: string, status: ApplicationStatus) => {
     setUpdatingId(appId);
     try {
-      await employerApi.updateApplicationStatus(appId, status);
-      setApplicants((prev) => prev.map((a) => a.id === appId ? { ...a, status: status as ApplicationWithStudent['status'] } : a));
+      await persistApplicationStatus(
+        appId,
+        status,
+        employerApi.updateApplicationStatus,
+        (savedStatus) => setApplicants((prev) => prev.map((a) => a.id === appId ? { ...a, status: savedStatus } : a)),
+      );
       toast.success('Status updated!');
-    } catch {
-      toast.error('Failed to update status.');
+    } catch (error) {
+      toast.error(getApplicationStatusUpdateError(error));
     } finally {
       setUpdatingId(null);
     }
@@ -153,7 +159,7 @@ const Applicants: React.FC = () => {
                       className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       value={app.status}
                       disabled={updatingId === app.id}
-                      onChange={(e) => handleStatusUpdate(app.id, e.target.value)}
+                      onChange={(e) => handleStatusUpdate(app.id, e.target.value as ApplicationStatus)}
                     >
                       {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{APPLICATION_STATUS_LABELS[s as keyof typeof APPLICATION_STATUS_LABELS] ?? s}</option>)}
                     </select>

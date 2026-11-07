@@ -372,7 +372,7 @@ flowchart LR
 ### Authentication and password handling
 
 - Passwords are hashed with `bcryptjs` at cost factor 12; plaintext passwords are not persisted.
-- Registration and password reset require 12-72 characters and at most 72 UTF-8 bytes to avoid bcrypt's input truncation behavior.
+- Registration and password reset require at least 12 characters, an uppercase letter, a lowercase letter, a number, and a non-whitespace special character. They retain the 72-character and 72 UTF-8-byte limits to avoid bcrypt's input truncation behavior. Login validates only the existing length/byte safeguards so existing accounts remain usable.
 - JWTs use HS256 only, have an expiry, and require a configured `JWT_SECRET`; production secrets must be at least 32 characters.
 - Browser sessions use `ss_token` with `HttpOnly`, `SameSite=Strict`, `/api` path, and `Secure` in production. The client no longer stores session tokens in localStorage.
 - Bearer tokens remain supported for API clients. The server uses a generic invalid-credentials response.
@@ -558,7 +558,7 @@ Open the URL Vite prints (normally `http://localhost:5173`). Verify `GET http://
 
 ### Student
 
-1. Register with an email, a 12+ character password, first/last name, and account type Student.
+1. Register with an email, a password of at least 12 characters containing uppercase and lowercase letters, a number, and a special character, first/last name, and account type Student.
 2. Sign in. The browser stores the session as an HttpOnly cookie; JavaScript cannot read the token.
 3. Complete education/contact details and add skills with proficiency.
 4. Browse internships, open a position, review requirements, and submit an application.

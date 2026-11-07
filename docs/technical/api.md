@@ -12,12 +12,12 @@
 
 | Method and path | Access | Purpose and notes |
 |---|---|---|
-| `POST /api/auth/register` | Public | Creates a student or employer account. Public registration cannot create admins. Sets an HttpOnly session cookie. |
+| `POST /api/auth/register` | Public | Creates a student or employer account. Requires at least 12 characters with uppercase, lowercase, a number, and a special character; passwords are limited to 72 characters and 72 UTF-8 bytes. Public registration cannot create admins. Sets an HttpOnly session cookie. |
 | `POST /api/auth/login` | Public | Verifies the password and sets the session cookie. |
 | `POST /api/auth/logout` | Public | Clears the session cookie. |
 | `GET /api/auth/me` | Authenticated | Returns the current user and profile. |
 | `POST /api/auth/forgot-password` | Public | Accepts an email and returns a non-enumerating acknowledgement. A token hash is stored when the account exists; no email provider is configured, and no raw token is returned. |
-| `POST /api/auth/reset-password` | Public | Consumes a valid unexpired reset token and updates the password. The token delivery flow is not configured. |
+| `POST /api/auth/reset-password` | Public | Consumes a valid unexpired reset token and updates the password using the same complexity and bcrypt length limits as registration. The token delivery flow is not configured. |
 
 ## Student: `/api/student`
 

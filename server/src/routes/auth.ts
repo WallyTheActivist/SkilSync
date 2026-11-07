@@ -3,20 +3,25 @@ import { body } from 'express-validator';
 import { register, login, getMe, forgotPassword, resetPassword, logout } from '../controllers/authController';
 import { authenticate } from '../middleware/auth';
 import { requiredPersonName, validateRequest } from '../middleware/validation';
+import { getPasswordValidationError } from '../utils/passwordPolicy';
 
 const router = Router();
 
 const passwordRule = (field: string) => body(field)
 	.isString()
 	.withMessage('Password must be a string.')
-	.isLength({ min: 12, max: 72 })
-	.withMessage('Password must be between 12 and 72 characters.')
-	.custom((value: string) => Buffer.byteLength(value, 'utf8') <= 72)
-	.withMessage('Password must not exceed 72 UTF-8 bytes.');
+	.bail()
+	.custom((value: string) => {
+		const error = getPasswordValidationError(value);
+		if (error) {
+			throw new Error(error);
+		}
+		return true;
+	});
 
-const requiredInstitutionValue = (field: string, label: string) => body(field).custom((value, { req }) => {
+const validateInstitutionValue = (field: string, label: string) => body(field).custom((value, { req }) => {
 	const role = req.body.role ?? 'STUDENT';
-	if (role === 'EMPLOYER') {
+	if (role === 'EMPLOYER' || value === undefined) {
 		return true;
 	}
 	if (typeof value !== 'string') {
@@ -62,7 +67,7 @@ router.post('/register', [
 	requiredPersonName('firstName', 'First name', 80),
 	requiredPersonName('lastName', 'Last name', 80),
 	body('role').optional().isIn(['STUDENT', 'EMPLOYER']),
-	requiredInstitutionValue('university', 'University'),
+	validateInstitutionValue('university', 'University'),
 	requiredCompanyValue('companyName', 'Company name'),
 	validateRequest,
 ], register);

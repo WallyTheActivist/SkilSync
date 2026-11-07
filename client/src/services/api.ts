@@ -25,6 +25,7 @@ import type {
   AdminApplication,
   AdminSkill,
   ReadinessBreakdown,
+  ApplicationStatus,
 } from '../types';
 
 const api = axios.create({
@@ -178,7 +179,7 @@ export const employerApi = {
     api.get<ApiResponse<ApplicationWithStudent[]>>(`/employer/internships/${internshipId}/applicants`, {
       params: { status },
     }),
-  updateApplicationStatus: (applicationId: string, status: string, notes?: string) =>
+  updateApplicationStatus: (applicationId: string, status: ApplicationStatus, notes?: string) =>
     api.patch<ApiResponse<Application>>(`/employer/applications/${applicationId}/status`, { status, notes }),
 };
 

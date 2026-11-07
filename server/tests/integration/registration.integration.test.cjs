@@ -143,4 +143,49 @@ if (!testDatabaseUrl) {
     assert.equal(restrictedRole.response.status, 400);
     assert.equal(await prisma.user.count({ where: { email: restrictedRoleEmail } }), 0);
   });
+
+  test('student and employer registration reject passwords that fail complexity requirements', async () => {
+    const invalidPasswords = [
+      '000000000000',
+      'abcdefghijkl',
+      'ABCDEFGHIJKL',
+      'Password1234',
+      'PasswordOnly!',
+      '1234567890!@',
+      'password123!',
+      'PASSWORD123!',
+      'Password!!!!',
+      'Password 1234',
+      '',
+    ];
+
+    for (const role of ['STUDENT', 'EMPLOYER']) {
+      for (const [index, password] of invalidPasswords.entries()) {
+        const email = `weak-${role.toLowerCase()}-${index}.${suffix}@skillsync.test`;
+        const { response, body } = await register(baseRegistration(email, {
+          password,
+          role,
+          ...(role === 'EMPLOYER' ? { companyName: 'Cape Digital Labs' } : { university: 'University of Cape Town' }),
+        }));
+        assert.equal(response.status, 400, `${role} password case ${index}`);
+        if (password) {
+          assert.equal(JSON.stringify(body).includes(password), false, `${role} password case ${index} echoed password`);
+        }
+        assert.equal(await prisma.user.count({ where: { email } }), 0, `${role} password case ${index} persisted`);
+      }
+    }
+  });
+
+  test('password reset rejects passwords that fail complexity requirements', async () => {
+    const password = 'Password1234';
+    const response = await fetch(`${baseUrl}/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'a'.repeat(64), password }),
+    });
+    const body = await response.text();
+    assert.equal(response.status, 400);
+    assert.equal(body.includes(password), false);
+    assert.match(body, /special character/);
+  });
 }

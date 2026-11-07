@@ -7,6 +7,7 @@ import { Button } from '../../components/ui/Button';
 import { normalizeRegistrationIdentityFields } from '../../utils/registrationIdentity.mjs';
 import {
   getPasswordStrengthScore,
+  getPasswordRequirements,
   getPasswordValidationError,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
@@ -52,6 +53,7 @@ export const Register: React.FC = () => {
   };
 
   const passwordStrength = getPasswordStrengthScore(form.password);
+  const passwordRequirements = getPasswordRequirements(form.password);
 
   const strengthColors = ['bg-red-400', 'bg-orange-400', 'bg-yellow-400', 'bg-emerald-500'];
   const strengthLabels = ['Weak', 'Fair', 'Good', 'Strong'];
@@ -63,7 +65,15 @@ export const Register: React.FC = () => {
     if (!form.firstName.trim()) nextErrors.firstName = 'First name is required.';
     if (!form.lastName.trim()) nextErrors.lastName = 'Last name is required.';
     if (!form.email.trim()) nextErrors.email = 'Email is required.';
-    if (!form.password) nextErrors.password = 'Password is required.';
+    else if (form.email.trim().length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      nextErrors.email = 'Please provide a valid email address.';
+    }
+    if (!form.password) {
+      nextErrors.password = 'Password is required.';
+    } else {
+      const passwordError = getPasswordValidationError(form.password);
+      if (passwordError) nextErrors.password = passwordError;
+    }
     if (form.role === 'STUDENT' && !form.university.trim()) nextErrors.university = 'University is required.';
     if (form.role === 'EMPLOYER' && !form.companyName.trim()) nextErrors.companyName = 'Company name is required.';
 
@@ -90,12 +100,6 @@ export const Register: React.FC = () => {
     if (!passwordsMatch(form.password, form.confirmPassword)) {
       setFieldErrors((current) => ({ ...current, confirmPassword: 'Passwords do not match.' }));
       toast.error('Passwords do not match.');
-      return;
-    }
-    const passwordError = getPasswordValidationError(form.password);
-    if (passwordError) {
-      setFieldErrors((current) => ({ ...current, password: passwordError }));
-      toast.error(passwordError);
       return;
     }
     setIsLoading(true);
@@ -185,7 +189,7 @@ export const Register: React.FC = () => {
             ))}
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4" noValidate>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">First Name <span className="text-red-500">*</span></label>
@@ -275,13 +279,29 @@ export const Register: React.FC = () => {
                   className={`w-full pl-9 pr-12 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${fieldErrors.password ? 'border-red-300' : 'border-gray-200'}`}
                   placeholder="12-72 characters" minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} required autoComplete="new-password"
                   aria-invalid={Boolean(fieldErrors.password)}
-                  aria-describedby={fieldErrors.password ? 'password-error' : undefined}
+                  aria-describedby={`password-requirements${fieldErrors.password ? ' password-error' : ''}`}
                 />
                 <button type="button" onClick={() => setShowPassword((s) => !s)} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
                   {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
               {fieldErrors.password && <p id="password-error" className="mt-1 text-xs text-red-600">{fieldErrors.password}</p>}
+              <div id="password-requirements" className="mt-2">
+                <p className="text-xs font-medium text-gray-700 mb-1">Password requirements:</p>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-y-1 text-xs">
+                  {passwordRequirements.map((requirement) => (
+                    <li
+                      key={requirement.id}
+                      className={requirement.met ? 'text-emerald-700' : 'text-gray-500'}
+                    >
+                      <span aria-hidden="true" className="inline-block w-4 font-semibold">
+                        {requirement.met ? '✓' : '○'}
+                      </span>
+                      {requirement.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
               <p className="text-xs text-gray-500 mt-1">{PASSWORD_POLICY_GUIDANCE}</p>
               {form.password && (
                 <div className="mt-2">
