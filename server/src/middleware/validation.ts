@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
+import { normalizeRegistrationPersonName } from '../utils/registrationValidation';
 
 const HAS_LETTER = /\p{L}/u;
 const MEANINGLESS_TEXT = /^[\p{N}\p{P}\p{S}\p{Zs}\s]+$/u;
@@ -29,9 +30,14 @@ export const requiredText = (field: string, maxLength: number) =>
 export const requiredPersonName = (field: string, label: string, maxLength: number) =>
   body(field)
     .isString().withMessage(`${label} must be text.`).bail()
-    .trim()
-    .custom((value: string) => typeof value === 'string' && value.length >= 1 && value.length <= maxLength && isMeaningfulName(value))
-    .withMessage(`${label} must be between 1 and ${maxLength} characters and include at least one letter.`);
+    .custom((value: string, { req }) => {
+      const normalized = normalizeRegistrationPersonName(value, label);
+      if (normalized.length > maxLength) {
+        throw new Error(`${label} must be no more than ${maxLength} characters.`);
+      }
+      req.body[field] = normalized;
+      return true;
+    });
 
 export const optionalPersonName = (field: string, label: string, maxLength: number) =>
   body(field)

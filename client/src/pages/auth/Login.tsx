@@ -4,6 +4,7 @@ import { Zap, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
+import { authApi } from '../../services/api';
 
 export const Login: React.FC = () => {
   const { login } = useAuth();
@@ -11,6 +12,8 @@ export const Login: React.FC = () => {
   const [form, setForm] = useState({ email: '', password: '' });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resendMessage, setResendMessage] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -19,15 +22,29 @@ export const Login: React.FC = () => {
       return;
     }
     setIsLoading(true);
+    setNeedsVerification(false);
+    setResendMessage('');
     try {
       await login(form.email, form.password);
       toast.success('Welcome back!');
       navigate('/dashboard');
     } catch (err: unknown) {
-      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Login failed. Please check your credentials.';
+      const responseData = (err as { response?: { data?: { message?: string; code?: string } } })?.response?.data;
+      if (responseData?.code === 'EMAIL_NOT_VERIFIED') setNeedsVerification(true);
+      const message = responseData?.message ?? 'Login failed. Please check your credentials.';
       toast.error(message);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    try {
+      const { data } = await authApi.resendVerification(form.email);
+      setResendMessage(data.message || 'If an unverified employer account exists, the verification request has been accepted.');
+    } catch (error: unknown) {
+      const message = (error as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setResendMessage(message || 'We could not process the request. Please try again later.');
     }
   };
 
@@ -131,6 +148,19 @@ export const Login: React.FC = () => {
               Sign In
             </Button>
           </form>
+          {needsVerification && (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-sm text-amber-900">Verify your organisation email before signing in.</p>
+              <button
+                className="mt-2 text-sm font-semibold text-primary-700 hover:text-primary-800"
+                type="button"
+                onClick={resendVerification}
+              >
+                Resend verification email
+              </button>
+              {resendMessage && <p aria-live="polite" className="mt-2 text-sm text-gray-700">{resendMessage}</p>}
+            </div>
+          )}
 
           <p className="text-center text-sm text-gray-500 mt-6">
             Don't have an account?{' '}

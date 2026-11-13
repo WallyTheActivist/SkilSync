@@ -69,6 +69,75 @@ test('student and employer registration reject weak passwords with safe validati
   }
 });
 
+test('registration API rejects invalid names and emails before account creation', async () => {
+  const invalidRegistrations = [
+    { firstName: 'A' },
+    { lastName: 'B' },
+    { firstName: '  ' },
+    { lastName: '!!!' },
+    { firstName: '123' },
+    { firstName: 'Jo.Smith' },
+    { email: 'nathan@g.com' },
+    { email: 'wallygmail.com' },
+    { email: 'wally@@gmail.com' },
+    { email: 'wally@gmail' },
+    { email: 'wally gmail@gmail.com' },
+    { email: 'wally..makama@gmail.com' },
+    { email: 'wally@.com' },
+    { email: 'wally@gmail..com' },
+    { email: '@gmail.com' },
+  ];
+
+  for (const [index, fields] of invalidRegistrations.entries()) {
+    const response = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: `valid-${index}@example.test`,
+        password: 'Synthetic-Registration-Pass-2026!',
+        firstName: 'Amara',
+        lastName: 'Ndlovu',
+        ...fields,
+      }),
+    });
+
+    assert.equal(response.status, 400, JSON.stringify(fields));
+  }
+});
+
+test('registration API applies personal email restrictions and organisation requirements by role', async () => {
+  for (const domain of ['gmail.com', 'yahoo.com', 'outlook.com', 'GMAIL.COM']) {
+    const response = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: `employer@${domain}`,
+        password: 'Synthetic-Registration-Pass-2026!',
+        firstName: 'Amara',
+        lastName: 'Ndlovu',
+        role: 'EMPLOYER',
+        companyName: 'Cape Digital Labs',
+      }),
+    });
+
+    assert.equal(response.status, 400, domain);
+    assert.match(await response.text(), /organisation email address/i);
+  }
+
+  const missingCompanyName = await fetch(`${baseUrl}/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: 'employer@company.co.za',
+      password: 'Synthetic-Registration-Pass-2026!',
+      firstName: 'Amara',
+      lastName: 'Ndlovu',
+      role: 'EMPLOYER',
+    }),
+  });
+  assert.equal(missingCompanyName.status, 400);
+});
+
 test('password reset applies the same complexity policy before token lookup', async () => {
   const password = 'Password1234';
   const response = await fetch(`${baseUrl}/auth/reset-password`, {

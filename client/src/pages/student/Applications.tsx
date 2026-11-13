@@ -12,6 +12,7 @@ import {
   APPLICATION_STATUS_LABELS, APPLICATION_STATUS_COLORS,
   formatDate, formatCurrency, getMatchScoreColor,
 } from '../../utils/helpers';
+import { isApplicationClosed } from '../../utils/applicationLifecycle.mjs';
 import clsx from 'clsx';
 
 const STATUS_STEPS: ApplicationStatus[] = [
@@ -151,6 +152,12 @@ export const Applications: React.FC = () => {
                           <span className="text-emerald-600">{formatCurrency(app.internship.stipend)}/mo</span>
                         )}
                       </div>
+                      {isApplicationClosed(app.closedAt) && (
+                        <p className="mt-3 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                          The employer has closed this application process. Your application and decision remain in your history.
+                          {' '}Closed {formatDate(app.closedAt)}.
+                        </p>
+                      )}
 
                       {/* Progress timeline (active only) */}
                       {isActive && stepIdx >= 0 && (

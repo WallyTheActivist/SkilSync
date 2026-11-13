@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Users, Search, Filter, ChevronDown } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Users, ChevronDown, Archive } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { employerApi } from '../../services/api';
 import type { ApplicationWithStudent, Internship } from '../../types';
@@ -10,13 +10,13 @@ import { Button } from '../../components/ui/Button';
 import { ProgressBar } from '../../components/ui/ProgressBar';
 import { APPLICATION_STATUS_LABELS, APPLICATION_STATUS_COLORS, formatDate, getInitials } from '../../utils/helpers';
 import { getApplicationStatusUpdateError, persistApplicationStatus } from '../../utils/applicationStatusUpdate.mjs';
+import { isApplicationClosed } from '../../utils/applicationLifecycle.mjs';
 import type { ApplicationStatus } from '../../types';
 import clsx from 'clsx';
 
 const STATUS_OPTIONS: ApplicationStatus[] = ['PENDING', 'UNDER_REVIEW', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'ACCEPTED', 'REJECTED'];
 
 const Applicants: React.FC = () => {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const preselectedId = searchParams.get('internship') ?? '';
   const [internships, setInternships] = useState<Internship[]>([]);
@@ -24,6 +24,7 @@ const Applicants: React.FC = () => {
   const [applicants, setApplicants] = useState<ApplicationWithStudent[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
+  const [lifecycleFilter, setLifecycleFilter] = useState<'open' | 'closed'>('open');
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -41,11 +42,27 @@ const Applicants: React.FC = () => {
   useEffect(() => {
     if (!selectedInternship) return;
     setLoading(true);
-    employerApi.getApplicants(selectedInternship, statusFilter || undefined)
+    employerApi.getApplicants(selectedInternship, statusFilter || undefined, lifecycleFilter)
       .then((r) => setApplicants(r.data.data))
       .catch(() => toast.error('Failed to load applicants.'))
       .finally(() => setLoading(false));
-  }, [selectedInternship, statusFilter]);
+  }, [selectedInternship, statusFilter, lifecycleFilter]);
+
+  const handleCloseApplication = async (appId: string) => {
+    const confirmation = 'Close and archive this application? It will be archived for your employer account but will remain visible to the student with its decision and application history.';
+    if (!window.confirm(confirmation)) return;
+
+    setUpdatingId(appId);
+    try {
+      await employerApi.closeApplication(appId);
+      setApplicants((prev) => prev.filter((app) => app.id !== appId));
+      toast.success('Application archived.');
+    } catch {
+      toast.error('Failed to archive application.');
+    } finally {
+      setUpdatingId(null);
+    }
+  };
 
   const handleStatusUpdate = async (appId: string, status: ApplicationStatus) => {
     setUpdatingId(appId);
@@ -71,6 +88,26 @@ const Applicants: React.FC = () => {
       </div>
 
       {/* Filters */}
+      <div className="flex gap-2" role="tablist" aria-label="Application lifecycle">
+        {([
+          { value: 'open', label: 'Open applications' },
+          { value: 'closed', label: 'Archived applications' },
+        ] as const).map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={lifecycleFilter === value}
+            onClick={() => setLifecycleFilter(value)}
+            className={clsx(
+              'px-3 py-1.5 rounded-lg text-xs font-medium transition-colors',
+              lifecycleFilter === value ? 'bg-emerald-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="flex gap-3 flex-wrap">
         <div className="flex-1 min-w-48">
           <label className="text-xs text-gray-500 mb-1 block">Internship</label>
@@ -83,7 +120,7 @@ const Applicants: React.FC = () => {
           </select>
         </div>
         <div>
-          <label className="text-xs text-gray-500 mb-1 block">Status</label>
+          <label className="text-xs text-gray-500 mb-1 block">Decision status</label>
           <select
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             value={statusFilter}
@@ -104,8 +141,14 @@ const Applicants: React.FC = () => {
           <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
             <Users size={22} className="text-gray-400" />
           </div>
-          <p className="font-semibold text-gray-900">No applicants yet</p>
-          <p className="text-sm text-gray-500 mt-1">Applications will appear here once students apply.</p>
+          <p className="font-semibold text-gray-900">
+            {lifecycleFilter === 'closed' ? 'No archived applications' : 'No open applicants'}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">
+            {lifecycleFilter === 'closed'
+              ? 'Applications you archive will remain available here.'
+              : 'Open applications will appear here once students apply.'}
+          </p>
         </Card>
       ) : (
         <div className="space-y-3">
@@ -151,18 +194,35 @@ const Applicants: React.FC = () => {
                       </span>
                     </div>
                     <p className="text-xs text-gray-400 mt-1">Applied {formatDate(app.appliedAt)}</p>
+                    {isApplicationClosed(app.closedAt) && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        {app.internship?.title} · Archived {formatDate(app.closedAt)}
+                      </p>
+                    )}
                   </div>
 
                   {/* Actions */}
                   <div className="flex flex-col gap-2 shrink-0">
-                    <select
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                      value={app.status}
-                      disabled={updatingId === app.id}
-                      onChange={(e) => handleStatusUpdate(app.id, e.target.value as ApplicationStatus)}
-                    >
-                      {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{APPLICATION_STATUS_LABELS[s as keyof typeof APPLICATION_STATUS_LABELS] ?? s}</option>)}
-                    </select>
+                    {!isApplicationClosed(app.closedAt) && (
+                      <>
+                        <select
+                          className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          value={app.status}
+                          disabled={updatingId === app.id}
+                          onChange={(e) => handleStatusUpdate(app.id, e.target.value as ApplicationStatus)}
+                        >
+                          {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{APPLICATION_STATUS_LABELS[s as keyof typeof APPLICATION_STATUS_LABELS] ?? s}</option>)}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={updatingId === app.id}
+                          onClick={() => void handleCloseApplication(app.id)}
+                          className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50 flex items-center justify-center gap-1"
+                        >
+                          <Archive size={12} /> Close / Archive
+                        </button>
+                      </>
+                    )}
                     <button
                       onClick={() => setExpandedId(isExpanded ? null : app.id)}
                       className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1 justify-center"

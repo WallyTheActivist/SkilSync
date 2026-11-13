@@ -107,6 +107,57 @@ Run the scripts on Windows with PowerShell, Python 3.7 or later (with its standa
 
 Database archives are stored outside the project by default, under `C:\Projects\SkillSync-backups\database`. A custom destination can be supplied. The database archive is an unencrypted SQLite file; choose a protected, access-controlled destination (for example, encrypted removable storage or an approved encrypted backup service). Do not store it in GitHub or in the source ZIP folder. Keep more than one protected copy for recovery from device loss.
 
+The Admin Backup & Recovery page invokes the same protected PowerShell/Python backup workflow. Its destination is server-controlled: by default it uses the database directory above; an optional `SKILLSYNC_BACKUP_DIRECTORY` environment variable may select another absolute directory outside the project. Admin-created backup metadata is stored atomically in `manifest.json` beside the backups. After the script succeeds, the service calculates and stores the backup file's SHA-256 digest. History retains a Passed validation only while the stored size and digest match the file and the script's explicit validation output was confirmed. A missing file, size mismatch, digest mismatch, or inability to read the file cannot be shown as Passed. Hash mismatches are not silently adopted as new metadata. Older records without a digest and backup files without usable metadata are Not verified; downloads of these files are refused until there is trusted metadata.
+
+The SHA-256 value detects accidental or unrecorded content changes relative to the manifest; it is not a digital signature. An attacker who can replace both the backup and its manifest can create a consistent replacement. Keep the backup directory and manifest on access-controlled storage, and retain an independent protected copy.
+
+If the final manifest write fails after the database file was created, the Admin request returns a generic failure and the record is changed to failed where the manifest remains writable. The backup file is not automatically deleted. If the storage failure also prevents writing the failed record, the earlier in-progress record may remain; it is never reported as a successful validation. Review the server diagnostics and manifest/storage health before retrying.
+
+For downloads, the service opens the resolved file once, checks that the opened handle is a regular file, verifies its size and SHA-256 through that handle, and streams from the same handle. It also checks the path before and after opening and compares file identity where Windows reports it. The Windows runtime used for this implementation does not expose the `O_NOFOLLOW` open flag, so this narrows but cannot eliminate every race against an actor who can concurrently replace directory entries. Do not grant untrusted users write access to the backup directory; restrict it to the service account and trusted operators, avoid reparse points, and do not modify backups while they are being inspected or downloaded.
+
+For Admin-created backups, the service generates a unique temporary filename, creates an empty file there with exclusive-create semantics, and passes that exact path to the PowerShell script. The script validates the path and the empty regular file before invoking the helper. A standalone script invocation creates its own unique empty temporary file exclusively. The SQLite helper accepts only that empty placeholder (or refuses the path if it is no longer empty). Service cleanup attempts to remove only the path the current operation successfully created; a temporary file belonging to a separately invoked script is not selected for cleanup. A timed-out process may still leave a partial temporary file; inspect it only after confirming the PowerShell/Python process has stopped.
+
+For OneDrive status, `SKILLSYNC_ONEDRIVE_SYNC_DIRECTORY` may identify a local sync folder. A detected local OneDrive folder, or a matching backup file found there, does not independently verify completion of cloud synchronization. The Admin page reports cloud synchronization as not independently verified because no cloud-provider verification is implemented.
+
+### Investigate a stale Admin backup lock
+
+The Admin backup service creates `.skillsync-database-backup.lock` in the configured backup directory using exclusive create (`wx`). The lock intentionally contains no owner or process metadata. It is removed after the backup operation finishes normally. If the server is forcibly terminated, the lock file can remain and subsequent requests correctly receive a conflict. The service does not remove locks based on age, and an old timestamp alone is not evidence that a lock is stale.
+
+Before manually clearing a lock:
+
+1. Stop the SkillSync server normally (for a development server, press `Ctrl+C` in its console; for a managed service, stop that specific service). Do not clear the lock while a backup request may still be running.
+2. Locate the exact configured backup directory (`SKILLSYNC_BACKUP_DIRECTORY`, or `C:\Projects\SkillSync-backups\database` by default) and inspect the lock without changing it:
+
+   ```powershell
+   $backupDirectory = 'C:\Projects\SkillSync-backups\database'
+   $lockPath = Join-Path $backupDirectory '.skillsync-database-backup.lock'
+   Get-Item -LiteralPath $lockPath | Select-Object FullName, Length, LastWriteTimeUtc
+   ```
+
+3. Check for relevant remaining server or backup processes. Review the command lines and correlate process IDs with the server console/service you stopped; do not terminate unrelated processes:
+
+   ```powershell
+   Get-CimInstance Win32_Process |
+     Where-Object {
+       $_.Name -in @('node.exe', 'powershell.exe', 'python.exe', 'python3.exe') -and
+       $_.CommandLine -match 'SkillSync|backup-database\.ps1|sqlite_database\.py'
+     } |
+     Select-Object ProcessId, ParentProcessId, Name, CommandLine
+   ```
+
+   If a known SkillSync process remains, stop that specific process gracefully through its owning console/service. Recheck that its backup child processes have exited. If process ownership is ambiguous, leave the lock in place and investigate with the operator; do not guess based on the lock age.
+
+4. Only after confirming the SkillSync server and its backup child processes have stopped, preserve the lock for investigation by renaming it (rather than deleting it):
+
+   ```powershell
+   $staleLockPath = "$lockPath.stale-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+   Move-Item -LiteralPath $lockPath -Destination $staleLockPath
+   ```
+
+5. Restart the server and confirm the backup status/history endpoint is healthy. Do not start a new backup until the cause of the abandoned operation is understood. Keep the renamed lock file with incident notes; it contains no credentials.
+
+Never delete or rename the lock while any server process could still be creating a backup. This procedure is manual by design; lock ownership is not guessed and no automatic stale-lock stealing is performed.
+
 ### Create a database backup
 
 From PowerShell:

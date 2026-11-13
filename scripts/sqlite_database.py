@@ -122,11 +122,15 @@ def online_backup(source_path, destination_path):
 
 def run_backup(args):
     source = Path(args.source).resolve(strict=True)
-    destination = Path(args.destination).resolve()
+    destination_argument = Path(args.destination)
+    if destination_argument.is_symlink():
+        raise ValueError("The temporary backup destination cannot be a symbolic link.")
+    destination = destination_argument.resolve()
     if source == destination:
         raise ValueError("The backup destination cannot be the configured database.")
     if destination.exists():
-        raise FileExistsError("The temporary backup path already exists.")
+        if not destination.is_file() or destination.stat().st_size != 0:
+            raise FileExistsError("The temporary backup path already exists and is not an empty owned file.")
 
     online_backup(source, destination)
     if not destination.is_file() or destination.stat().st_size == 0:

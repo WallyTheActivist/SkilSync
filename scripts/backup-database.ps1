@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-  [string]$DestinationDirectory
+  [string]$DestinationDirectory,
+  [string]$TemporaryDatabasePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +26,44 @@ try {
 
   $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
   $backupPath = Join-Path $destinationPath "skillsync-database-$timestamp.sqlite"
-  $temporaryDatabasePath = Join-Path $destinationPath ".skillsync-database-$timestamp-$([guid]::NewGuid().ToString('N')).tmp"
+  if ([string]::IsNullOrWhiteSpace($TemporaryDatabasePath)) {
+    $candidateTemporaryPath = Join-Path $destinationPath ".skillsync-database-$timestamp-$([guid]::NewGuid().ToString('N')).tmp"
+    $temporaryHandle = $null
+    try {
+      $temporaryHandle = [System.IO.File]::Open(
+        $candidateTemporaryPath,
+        [System.IO.FileMode]::CreateNew,
+        [System.IO.FileAccess]::Write,
+        [System.IO.FileShare]::None
+      )
+      $temporaryDatabasePath = $candidateTemporaryPath
+    } finally {
+      if ($temporaryHandle) { $temporaryHandle.Dispose() }
+    }
+  } else {
+    $candidateTemporaryPath = [System.IO.Path]::GetFullPath($TemporaryDatabasePath)
+    if (
+      -not [string]::Equals(
+        (Split-Path -Parent $candidateTemporaryPath),
+        $destinationPath,
+        [System.StringComparison]::OrdinalIgnoreCase
+      ) -or
+      (Split-Path -Leaf $candidateTemporaryPath) -notmatch '^\.skillsync-database-\d{8}-\d{6}-\d{3}-[0-9a-f]{32}\.tmp$'
+    ) {
+      throw 'The operation-owned temporary backup path is invalid.'
+    }
+    if (-not (Test-Path -LiteralPath $candidateTemporaryPath -PathType Leaf)) {
+      throw 'The operation-owned temporary backup file is missing.'
+    }
+    $temporaryItem = Get-Item -LiteralPath $candidateTemporaryPath -Force
+    if (
+      ($temporaryItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0 -or
+      $temporaryItem.Length -ne 0
+    ) {
+      throw 'The operation-owned temporary backup file is not an empty regular file.'
+    }
+    $temporaryDatabasePath = $candidateTemporaryPath
+  }
 
   if (Test-Path -LiteralPath $backupPath) {
     throw 'A database backup with this timestamp already exists; refusing to overwrite it.'

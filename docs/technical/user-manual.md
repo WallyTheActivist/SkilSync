@@ -15,7 +15,7 @@ The forgot-password form accepts a request, but email delivery is not configured
 5. Open Matches to see active postings ranked by the current skill-match calculation. A posting's match-score endpoint returns matched, partial, missing, and bonus skill details.
 6. Open Skill Gap to review missing/weak skills and generated learning recommendations.
 7. Apply to an active internship. A student may have one application per internship. Submitted applications begin as `PENDING`.
-8. Open Applications to track status or withdraw an application while its status permits.
+8. Open Applications to track status or withdraw an application while its status permits. Employer-archived applications remain visible with their original decision and closure date.
 9. Upload an avatar from Profile. Accepted files are JPEG, PNG, and WebP up to 5 MB.
 
 There is no resume upload workflow in the current client/API, even though an optional resume URL field exists in the database schema.
@@ -27,7 +27,7 @@ There is no resume upload workflow in the current client/API, even though an opt
 3. Create an internship with title, description, duration, application deadline, and at least one required skill. Location may be omitted for remote postings.
 4. Manage your own postings from My Internships. Postings and applicant operations are checked against the signed-in employer's profile.
 5. Open applicants for a posting. Applicants are returned in descending match-score order.
-6. Update an applicant's status using the allowed hiring statuses. Students see status changes in their application list.
+6. Update an applicant's decision using the allowed hiring statuses. Use Close / Archive when processing is finished; this moves the application to Archived without changing its decision or hiding it from the student. Archived records remain available for review.
 
 ## Administrator
 

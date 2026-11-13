@@ -11,6 +11,8 @@ import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
+import VerifyEmail from './pages/auth/VerifyEmail';
+import EmailVerificationPending from './pages/auth/EmailVerificationPending';
 
 // Student pages
 import Dashboard from './pages/student/Dashboard';
@@ -38,6 +40,7 @@ import SkillsCatalogue from './pages/admin/SkillsCatalogue';
 import AdminApplications from './pages/admin/AdminApplications';
 import Analytics from './pages/admin/Analytics';
 import Reports from './pages/admin/Reports';
+import BackupRecovery from './pages/admin/BackupRecovery';
 
 // Protected Route wrapper
 const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: string }> = ({
@@ -86,6 +89,8 @@ const AppRoutes: React.FC = () => (
     <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
     <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
     <Route path="/reset-password" element={<PublicRoute><ResetPassword /></PublicRoute>} />
+    <Route path="/verify-email" element={<VerifyEmail />} />
+    <Route path="/verify-email/pending" element={<EmailVerificationPending />} />
 
     {/* Protected student routes */}
     <Route
@@ -143,6 +148,7 @@ const AppRoutes: React.FC = () => (
       <Route path="applications" element={<AdminApplications />} />
       <Route path="analytics" element={<Analytics />} />
       <Route path="reports" element={<Reports />} />
+      <Route path="backups" element={<BackupRecovery />} />
     </Route>
 
     {/* Fallback */}

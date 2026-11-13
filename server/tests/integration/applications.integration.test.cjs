@@ -199,6 +199,26 @@ const updateApplicationStatus = ({
   }).then(async (response) => ({ response, body: await response.json() }));
 };
 
+const applicationLifecycleRequest = (action, applicationId = 'application-test-001', role = 'EMPLOYER') => {
+  const isEmployer = role === 'EMPLOYER';
+  const token = signToken({
+    userId: isEmployer ? 'employer-user-test-001' : 'student-user-test-001',
+    email: isEmployer ? 'employer@skillsync.test' : 'amara@skillsync.test',
+    role,
+  });
+  return fetch(`${baseUrl}/employer/applications/${applicationId}/${action}`, {
+    method: 'PATCH',
+    headers: { Authorization: ['Bearer', token].join(' ') },
+  }).then(async (response) => ({ response, body: await response.json() }));
+};
+
+const getArchivedApplicants = () => {
+  const token = signToken({ userId: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' });
+  return fetch(`${baseUrl}/employer/internships/internship-test-001/applicants?lifecycle=closed`, {
+    headers: { Authorization: ['Bearer', token].join(' ') },
+  }).then(async (response) => ({ response, body: await response.json() }));
+};
+
 test('student can apply for a first internship', async (t) => {
   mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'student-user-test-001', email: 'amara@skillsync.test', role: 'STUDENT' }));
   mockMethod(t, prisma.studentProfile, 'findUnique', async () => ({ id: 'student-profile-test-001' }));
@@ -400,7 +420,7 @@ test('application creation still requires student authentication', async (t) => 
 });
 
 test('employer can advance an application to a valid next status', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(t, prisma.application, 'findUnique', async () => ({
     id: 'application-test-001',
@@ -422,7 +442,7 @@ test('employer can advance an application to a valid next status', async (t) => 
 });
 
 test('employer can reject an application that belongs to their internship', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(t, prisma.application, 'findUnique', async ({ where }) => ({
     id: where.id,
@@ -445,7 +465,7 @@ test('employer can reject an application that belongs to their internship', asyn
 });
 
 test('employer can accept an application that belongs to their internship', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(t, prisma.application, 'findUnique', async () => ({
     id: 'application-test-001',
@@ -467,7 +487,7 @@ test('employer can accept an application that belongs to their internship', asyn
 });
 
 test('employer cannot update an application belonging to another employer', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(t, prisma.application, 'findUnique', async () => ({
     id: 'application-test-001',
@@ -517,7 +537,7 @@ test('unauthenticated requests cannot update application status', async () => {
 });
 
 test('employer endpoint rejects invalid application statuses', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
 
   let applicationLookupCalled = false;
   mockMethod(t, prisma.application, 'findUnique', async () => {
@@ -533,7 +553,7 @@ test('employer endpoint rejects invalid application statuses', async (t) => {
 });
 
 test('updating one application does not modify another application', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   const applications = new Map([
     ['application-test-001', { id: 'application-test-001', status: 'PENDING', internship: { employerProfileId: 'employer-profile-test-001' } }],
@@ -558,7 +578,7 @@ test('updating one application does not modify another application', async (t) =
 });
 
 test('employer cannot perform an invalid status transition', async (t) => {
-  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER' }));
+  mockMethod(t, prisma.user, 'findUnique', async () => ({ id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(t, prisma.application, 'findUnique', async () => ({
     id: 'application-test-001',
@@ -577,4 +597,176 @@ test('employer cannot perform an invalid status transition', async (t) => {
   assert.equal(response.status, 409);
   assert.match(body.message, /transition|cannot be moved/i);
   assert.equal(updateCalled, false);
+});
+
+test('closing an accepted application preserves the same application for the student', async (t) => {
+  const application = {
+    id: 'application-test-001',
+    studentProfileId: 'student-profile-test-001',
+    internshipId: 'internship-test-001',
+    status: 'ACCEPTED',
+    matchScore: 87,
+    appliedAt: '2026-10-01T10:00:00.000Z',
+    updatedAt: '2026-10-02T10:00:00.000Z',
+    closedAt: null,
+    internship: {
+      id: 'internship-test-001',
+      title: 'Analyst Internship',
+      employerProfileId: 'employer-profile-test-001',
+    },
+  };
+  mockMethod(t, prisma.user, 'findUnique', async ({ where }) => ({
+    id: where.id,
+    email: 'user@skillsync.test',
+    role: where.id === 'employer-user-test-001' ? 'EMPLOYER' : 'STUDENT',
+    emailVerified: true,
+  }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.studentProfile, 'findUnique', async () => ({ id: 'student-profile-test-001' }));
+  mockMethod(t, prisma.application, 'findUnique', async () => application);
+  let updateQuery;
+  mockMethod(t, prisma.application, 'updateMany', async (args) => {
+    updateQuery = args;
+    application.closedAt = args.data.closedAt;
+    return { count: 1 };
+  });
+  mockMethod(t, prisma.application, 'findMany', async () => [application]);
+
+  const { response, body } = await applicationLifecycleRequest('close');
+  assert.equal(response.status, 200);
+  assert.equal(body.data.id, 'application-test-001');
+  assert.equal(body.data.status, 'ACCEPTED');
+  assert.ok(body.data.closedAt);
+  assert.deepEqual(updateQuery.where, { id: application.id, closedAt: null });
+  assert.equal(new Date(updateQuery.data.closedAt).toISOString(), body.data.closedAt);
+
+  const studentResponse = await getMyApplications();
+  assert.equal(studentResponse.response.status, 200);
+  assert.equal(studentResponse.body.data.length, 1);
+  assert.equal(studentResponse.body.data[0].id, 'application-test-001');
+  assert.equal(studentResponse.body.data[0].studentProfileId, 'student-profile-test-001');
+  assert.equal(studentResponse.body.data[0].internshipId, 'internship-test-001');
+  assert.equal(studentResponse.body.data[0].status, 'ACCEPTED');
+  assert.equal(studentResponse.body.data[0].matchScore, 87);
+  assert.equal(studentResponse.body.data[0].internship.id, 'internship-test-001');
+  assert.equal(studentResponse.body.data[0].internship.title, 'Analyst Internship');
+  assert.equal(studentResponse.body.data[0].closedAt, body.data.closedAt);
+  assert.equal(application.appliedAt, '2026-10-01T10:00:00.000Z');
+  assert.equal(application.studentProfileId, 'student-profile-test-001');
+  assert.equal(application.internship.id, 'internship-test-001');
+});
+
+test('employer cannot close another employer’s application', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({
+    id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true,
+  }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.application, 'findUnique', async () => ({
+    id: 'application-test-001',
+    closedAt: null,
+    internship: { employerProfileId: 'another-employer-profile' },
+  }));
+  let updateCalled = false;
+  mockMethod(t, prisma.application, 'updateMany', async () => {
+    updateCalled = true;
+    return { count: 1 };
+  });
+
+  const { response, body } = await applicationLifecycleRequest('close');
+  assert.equal(response.status, 403);
+  assert.match(body.message, /not authorized/i);
+  assert.equal(updateCalled, false);
+});
+
+test('unverified employer cannot close applications', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({
+    id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: false,
+  }));
+  let profileLookupCalled = false;
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => {
+    profileLookupCalled = true;
+    return { id: 'employer-profile-test-001' };
+  });
+
+  const { response, body } = await applicationLifecycleRequest('close');
+  assert.equal(response.status, 403);
+  assert.equal(body.code, 'EMAIL_NOT_VERIFIED');
+  assert.equal(profileLookupCalled, false);
+});
+
+test('repeated closure requests preserve the original closure timestamp', async (t) => {
+  const closureTime = '2026-11-01T12:00:00.000Z';
+  mockMethod(t, prisma.user, 'findUnique', async () => ({
+    id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true,
+  }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.application, 'findUnique', async () => ({
+    id: 'application-test-001',
+    status: 'ACCEPTED',
+    closedAt: closureTime,
+    internship: { employerProfileId: 'employer-profile-test-001' },
+  }));
+  let updateCalled = false;
+  mockMethod(t, prisma.application, 'updateMany', async () => {
+    updateCalled = true;
+    return { count: 1 };
+  });
+
+  const { response, body } = await applicationLifecycleRequest('close');
+  assert.equal(response.status, 200);
+  assert.equal(body.data.closedAt, closureTime);
+  assert.equal(updateCalled, false);
+});
+
+test('archived applications are returned in the employer archived view', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({
+    id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true,
+  }));
+  mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
+  mockMethod(t, prisma.internship, 'findFirst', async () => ({
+    id: 'internship-test-001', employerProfileId: 'employer-profile-test-001',
+  }));
+  let listQuery;
+  mockMethod(t, prisma.application, 'findMany', async (args) => {
+    listQuery = args;
+    return [{ id: 'application-test-001', status: 'REJECTED', closedAt: new Date(), internship: { title: 'Analyst Intern' } }];
+  });
+
+  const { response, body } = await getArchivedApplicants();
+  assert.equal(response.status, 200);
+  assert.equal(body.data[0].status, 'REJECTED');
+  assert.ok(body.data[0].closedAt);
+  assert.equal(body.data[0].internship.title, 'Analyst Intern');
+  assert.deepEqual(listQuery.where, { internshipId: 'internship-test-001', closedAt: { not: null } });
+});
+
+test('students cannot close applications through employer endpoints', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({
+    id: 'student-user-test-001', email: 'amara@skillsync.test', role: 'STUDENT', emailVerified: true,
+  }));
+  let applicationLookupCalled = false;
+  mockMethod(t, prisma.application, 'findUnique', async () => {
+    applicationLookupCalled = true;
+    return null;
+  });
+
+  const { response } = await applicationLifecycleRequest('close', 'application-test-001', 'STUDENT');
+  assert.equal(response.status, 403);
+  assert.equal(applicationLookupCalled, false);
+});
+
+test('there is no employer application delete endpoint', async (t) => {
+  mockMethod(t, prisma.user, 'findUnique', async () => ({
+    id: 'employer-user-test-001', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true,
+  }));
+  const token = signToken({
+    userId: 'employer-user-test-001',
+    email: 'employer@skillsync.test',
+    role: 'EMPLOYER',
+  });
+  const response = await fetch(`${baseUrl}/employer/applications/application-test-001`, {
+    method: 'DELETE',
+    headers: { Authorization: ['Bearer', token].join(' ') },
+  });
+  assert.equal(response.status, 404);
 });

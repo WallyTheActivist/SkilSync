@@ -1,7 +1,18 @@
 import { Response, NextFunction } from 'express';
+import type { FileHandle } from 'fs/promises';
 import prisma from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { createError } from '../middleware/errorHandler';
+import {
+  BackupConflictError,
+  BackupIntegrityError,
+  BackupNotFoundError,
+  InvalidBackupIdentifierError,
+  createDatabaseBackup,
+  getBackupStatusSummary,
+  listBackupHistory,
+  openVerifiedBackup,
+} from '../services/backupService';
 
 const isPrismaRecordNotFoundError = (error: unknown): boolean =>
   typeof error === 'object'
@@ -250,6 +261,9 @@ export const deleteUser = async (req: AuthRequest, res: Response, next: NextFunc
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ success: true, message: 'User deleted.' });
   } catch (err) {
+    if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2003') {
+      return next(createError('This user has application history and cannot be permanently deleted.', 409));
+    }
     next(err);
   }
 };
@@ -323,6 +337,9 @@ export const deleteInternship = async (req: AuthRequest, res: Response, next: Ne
   } catch (err) {
     if (isPrismaRecordNotFoundError(err)) {
       return next(createError('Internship not found.', 404));
+    }
+    if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2003') {
+      return next(createError('This internship has application history and cannot be permanently deleted.', 409));
     }
     next(err);
   }
@@ -431,5 +448,95 @@ export const deleteSkill = async (req: AuthRequest, res: Response, next: NextFun
       return next(createError('Skill not found.', 404));
     }
     next(err);
+  }
+};
+
+// ─── Backup & recovery endpoints ──────────────────────────────────────────────
+export const getBackupHistory = async (_req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const backups = await listBackupHistory();
+    const status = await getBackupStatusSummary(backups);
+    res.json({
+      success: true,
+      data: {
+        backups,
+        total: backups.length,
+        status,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const createBackup = async (_req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const result = await createDatabaseBackup();
+    res.status(201).json({
+      success: true,
+      message: result.message,
+      data: {
+        backup: result.backup,
+      },
+    });
+  } catch (err) {
+    if (err instanceof BackupConflictError) {
+      return next(createError('A database backup is already in progress. Try again after it completes.', 409));
+    }
+    console.error('[admin-backup] Database backup creation failed.', err);
+    return next(createError('Database backup could not be created.', 500));
+  }
+};
+
+export const downloadBackup = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  let openedHandle: FileHandle | null = null;
+  try {
+    const backup = await openVerifiedBackup(req.params.id);
+    openedHandle = backup.handle;
+    const stream = backup.handle.createReadStream({ autoClose: false, start: 0 });
+    let handleClosed = false;
+    const closeHandle = (): void => {
+      if (handleClosed) return;
+      handleClosed = true;
+      void backup.handle.close().catch((err) => console.error('[admin-backup] Could not close verified download handle.', err));
+    };
+
+    res.once('finish', closeHandle);
+    res.once('close', () => {
+      stream.destroy();
+      closeHandle();
+    });
+    res.attachment(backup.filename);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', backup.sizeBytes);
+    stream.once('error', (err) => {
+      console.error('[admin-backup] Backup download stream failed.', err);
+      closeHandle();
+      if (res.headersSent || res.destroyed) {
+        res.destroy();
+        return;
+      }
+      next(createError('Unable to download the backup file.', 500));
+    });
+    openedHandle = null;
+    stream.pipe(res);
+  } catch (err) {
+    if (openedHandle) {
+      await openedHandle.close().catch((closeError) => console.error('[admin-backup] Could not close verified download handle.', closeError));
+    }
+    if (err instanceof InvalidBackupIdentifierError) {
+      return next(createError('Invalid backup identifier.', 400));
+    }
+    if (err instanceof BackupIntegrityError) {
+      return next(createError('Backup integrity could not be verified.', 409));
+    }
+    if (err instanceof BackupNotFoundError) {
+      return next(createError('Backup not found.', 404));
+    }
+    if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'ENOENT') {
+      return next(createError('Backup not found.', 404));
+    }
+    console.error('[admin-backup] Backup download failed.', err);
+    next(createError('Unable to download the backup file.', 500));
   }
 };

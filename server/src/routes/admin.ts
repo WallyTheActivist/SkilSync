@@ -11,6 +11,7 @@ import {
   getAllInternships, updateInternship, deleteInternship,
   getAllApplications,
   getSkills, createSkill, updateSkill, deleteSkill,
+  getBackupHistory, createBackup, downloadBackup,
 } from '../controllers/adminController';
 
 const router = Router();
@@ -65,5 +66,9 @@ router.put('/skills/:id', [
   validateRequest,
 ], updateSkill);
 router.delete('/skills/:id', [idParam(), validateRequest], deleteSkill);
+
+router.get('/backups', getBackupHistory);
+router.post('/backups', createBackup);
+router.get('/backups/:id/download', downloadBackup);
 
 export default router;

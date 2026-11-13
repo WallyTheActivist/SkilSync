@@ -3,7 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   LayoutDashboard, Users, Building2, Briefcase, Award,
-  FileText, BarChart3, LogOut, Zap,
+  FileText, BarChart3, LogOut, Zap, Database,
 } from 'lucide-react';
 
 const adminNav = [
@@ -14,6 +14,7 @@ const adminNav = [
   { label: 'Skills', to: '/admin/skills', icon: Award },
   { label: 'Applications', to: '/admin/applications', icon: FileText },
   { label: 'Reports', to: '/admin/reports', icon: BarChart3 },
+  { label: 'Backup & Recovery', to: '/admin/backups', icon: Database },
 ];
 
 interface AdminSidebarProps {

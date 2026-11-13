@@ -1,9 +1,12 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
 import { register, login, getMe, forgotPassword, resetPassword, logout } from '../controllers/authController';
+import { resendEmailVerification, verifyEmail } from '../controllers/emailVerificationController';
 import { authenticate } from '../middleware/auth';
 import { requiredPersonName, validateRequest } from '../middleware/validation';
 import { getPasswordValidationError } from '../utils/passwordPolicy';
+import { normalizeRegistrationEmail } from '../utils/registrationValidation';
+import { createEmailVerificationRateLimiter } from '../config/emailVerificationRateLimit';
 
 const router = Router();
 
@@ -62,7 +65,11 @@ const requiredCompanyValue = (field: string, label: string) => body(field).custo
 });
 
 router.post('/register', [
-	body('email').isString().trim().toLowerCase().isEmail().isLength({ max: 254 }),
+	body('email').isString().withMessage('Email must be text.').bail().custom((value, { req }) => {
+		const normalized = normalizeRegistrationEmail(value, req.body.role ?? 'STUDENT');
+		req.body.email = normalized;
+		return true;
+	}),
 	passwordRule('password'),
 	requiredPersonName('firstName', 'First name', 80),
 	requiredPersonName('lastName', 'Last name', 80),
@@ -71,6 +78,23 @@ router.post('/register', [
 	requiredCompanyValue('companyName', 'Company name'),
 	validateRequest,
 ], register);
+router.post('/verify-email', createEmailVerificationRateLimiter({
+	windowMs: 15 * 60 * 1000,
+	max: 10,
+}), [
+	body('token').isString().withMessage('Verification token is required.').bail()
+		.isHexadecimal().withMessage('Invalid verification link.')
+		.isLength({ min: 64, max: 64 }).withMessage('Invalid verification link.'),
+	validateRequest,
+], verifyEmail);
+router.post('/resend-verification', createEmailVerificationRateLimiter(), [
+	body('email').isString().withMessage('Email must be text.').bail().custom((value, { req }) => {
+		const normalized = normalizeRegistrationEmail(value);
+		req.body.email = normalized;
+		return true;
+	}),
+	validateRequest,
+], resendEmailVerification);
 router.post('/login', [
 	body('email').isString().trim().toLowerCase().isEmail().isLength({ max: 254 }),
 	body('password').isString().isLength({ min: 1, max: 72 })

@@ -13,7 +13,7 @@ const { errorHandler } = require('../../dist/middleware/errorHandler');
 const users = new Map([
   ['reports-admin', { id: 'reports-admin', email: 'admin@skillsync.test', role: 'ADMIN' }],
   ['reports-student', { id: 'reports-student', email: 'student@skillsync.test', role: 'STUDENT' }],
-  ['reports-employer', { id: 'reports-employer', email: 'employer@skillsync.test', role: 'EMPLOYER' }],
+  ['reports-employer', { id: 'reports-employer', email: 'employer@skillsync.test', role: 'EMPLOYER', emailVerified: true }],
 ]);
 
 const app = express();

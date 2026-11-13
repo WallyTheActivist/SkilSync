@@ -4,7 +4,12 @@ import { Zap, Mail, Lock, User, GraduationCap, Building2, Eye, EyeOff, CheckCirc
 import toast from 'react-hot-toast';
 import { useAuth } from '../../contexts/AuthContext';
 import { Button } from '../../components/ui/Button';
-import { normalizeRegistrationIdentityFields } from '../../utils/registrationIdentity.mjs';
+import {
+  normalizeOrganizationName,
+  normalizePersonName,
+  normalizeRegistrationEmail,
+  normalizeRegistrationIdentityFields,
+} from '../../utils/registrationIdentity.mjs';
 import {
   getPasswordStrengthScore,
   getPasswordRequirements,
@@ -52,6 +57,61 @@ export const Register: React.FC = () => {
     setForm((f) => ({ ...f, [field]: e.target.value }));
   };
 
+  const getFieldValidationError = (
+    field: 'firstName' | 'lastName' | 'email',
+    value: string,
+    role: FormState['role'] = form.role,
+  ): string => {
+    try {
+      if (field === 'email') {
+        normalizeRegistrationEmail(value, role);
+      } else {
+        normalizePersonName(value, field === 'firstName' ? 'First name' : 'Last name');
+      }
+      return '';
+    } catch (error) {
+      return error instanceof Error ? error.message : 'Please check this field.';
+    }
+  };
+
+  const validateOnBlur = (field: 'firstName' | 'lastName' | 'email') => () => {
+    setFieldErrors((current) => {
+      const next = { ...current };
+      const error = getFieldValidationError(field, form[field]);
+      if (error) next[field] = error;
+      else delete next[field];
+      return next;
+    });
+  };
+
+  const validateOrganizationOnBlur = () => {
+    if (form.role !== 'EMPLOYER' || !form.companyName) return;
+    setFieldErrors((current) => {
+      try {
+        normalizeOrganizationName(form.companyName);
+        const next = { ...current };
+        delete next.companyName;
+        return next;
+      } catch (error) {
+        return {
+          ...current,
+          companyName: error instanceof Error ? error.message : 'Please enter an organisation name.',
+        };
+      }
+    });
+  };
+
+  const changeRole = (role: FormState['role']) => {
+    setForm((current) => ({ ...current, role }));
+    setFieldErrors((current) => {
+      const next = { ...current };
+      const emailError = form.email ? getFieldValidationError('email', form.email, role) : '';
+      if (emailError) next.email = emailError;
+      else delete next.email;
+      return next;
+    });
+  };
+
   const passwordStrength = getPasswordStrengthScore(form.password);
   const passwordRequirements = getPasswordRequirements(form.password);
 
@@ -62,11 +122,15 @@ export const Register: React.FC = () => {
     e.preventDefault();
 
     const nextErrors: Record<string, string> = {};
-    if (!form.firstName.trim()) nextErrors.firstName = 'First name is required.';
-    if (!form.lastName.trim()) nextErrors.lastName = 'Last name is required.';
-    if (!form.email.trim()) nextErrors.email = 'Email is required.';
-    else if (form.email.trim().length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-      nextErrors.email = 'Please provide a valid email address.';
+    let normalizedEmail = '';
+    for (const field of ['firstName', 'lastName', 'email'] as const) {
+      const error = getFieldValidationError(field, form[field]);
+      if (error) nextErrors[field] = error;
+    }
+    try {
+      normalizedEmail = normalizeRegistrationEmail(form.email, form.role);
+    } catch {
+      // The field-specific error is already recorded above.
     }
     if (!form.password) {
       nextErrors.password = 'Password is required.';
@@ -75,7 +139,14 @@ export const Register: React.FC = () => {
       if (passwordError) nextErrors.password = passwordError;
     }
     if (form.role === 'STUDENT' && !form.university.trim()) nextErrors.university = 'University is required.';
-    if (form.role === 'EMPLOYER' && !form.companyName.trim()) nextErrors.companyName = 'Company name is required.';
+    let normalizedCompanyName = '';
+    if (form.role === 'EMPLOYER') {
+      try {
+        normalizedCompanyName = normalizeOrganizationName(form.companyName);
+      } catch (error) {
+        nextErrors.companyName = error instanceof Error ? error.message : 'Please enter an organisation name.';
+      }
+    }
 
     if (Object.keys(nextErrors).length > 0) {
       setFieldErrors(nextErrors);
@@ -92,7 +163,7 @@ export const Register: React.FC = () => {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Please check your name and registration details.';
-      setFieldErrors((current) => ({ ...current, firstName: current.firstName || '', lastName: current.lastName || '', university: form.role === 'STUDENT' ? message : current.university || '' }));
+      setFieldErrors((current) => ({ ...current, university: form.role === 'STUDENT' ? message : current.university || '' }));
       toast.error(message);
       return;
     }
@@ -104,17 +175,22 @@ export const Register: React.FC = () => {
     }
     setIsLoading(true);
     try {
-      await register({
+      const registeredUser = await register({
         firstName: identity.firstName,
         lastName: identity.lastName,
-        email: form.email.trim(),
+        email: normalizedEmail,
         university: form.role === 'STUDENT' ? identity.university : undefined,
-        companyName: form.role === 'EMPLOYER' ? form.companyName.trim() : undefined,
+        companyName: form.role === 'EMPLOYER' ? normalizedCompanyName : undefined,
         password: form.password,
         role: form.role,
       });
-      toast.success('Account created! Welcome to SkillSync.');
-      navigate(form.role === 'EMPLOYER' ? '/employer/dashboard' : '/dashboard');
+      if (form.role === 'EMPLOYER') {
+        toast.success('Account created. Check your email to verify your organisation.');
+        navigate('/verify-email/pending', { state: { email: registeredUser.email } });
+      } else {
+        toast.success('Account created! Welcome to SkillSync.');
+        navigate('/dashboard');
+      }
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Registration failed.';
       toast.error(message);
@@ -181,7 +257,7 @@ export const Register: React.FC = () => {
               <button
                 key={role}
                 type="button"
-                onClick={() => setForm((f) => ({ ...f, role }))}
+                onClick={() => changeRole(role)}
                 className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${form.role === role ? 'bg-white shadow text-primary-700' : 'text-gray-500 hover:text-gray-700'}`}
               >
                 {role === 'STUDENT' ? '🎓 Student' : '🏢 Employer'}
@@ -196,7 +272,7 @@ export const Register: React.FC = () => {
                 <div className="relative">
                   <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
-                    type="text" value={form.firstName} onChange={set('firstName')}
+                    type="text" value={form.firstName} onChange={set('firstName')} onBlur={validateOnBlur('firstName')}
                     className={`w-full pl-9 pr-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${fieldErrors.firstName ? 'border-red-300' : 'border-gray-200'}`}
                     placeholder="Alex" required
                     aria-invalid={Boolean(fieldErrors.firstName)}
@@ -210,7 +286,7 @@ export const Register: React.FC = () => {
                 <div className="relative">
                   <User size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
-                    type="text" value={form.lastName} onChange={set('lastName')}
+                    type="text" value={form.lastName} onChange={set('lastName')} onBlur={validateOnBlur('lastName')}
                     className={`w-full pl-9 pr-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${fieldErrors.lastName ? 'border-red-300' : 'border-gray-200'}`}
                     placeholder="Johnson" required
                     aria-invalid={Boolean(fieldErrors.lastName)}
@@ -226,7 +302,7 @@ export const Register: React.FC = () => {
               <div className="relative">
                 <Mail size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
-                  type="email" value={form.email} onChange={set('email')}
+                  type="email" value={form.email} onChange={set('email')} onBlur={validateOnBlur('email')}
                   className={`w-full pl-9 pr-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${fieldErrors.email ? 'border-red-300' : 'border-gray-200'}`}
                   placeholder="you@university.ac.za" required autoComplete="email"
                   aria-invalid={Boolean(fieldErrors.email)}
@@ -254,19 +330,20 @@ export const Register: React.FC = () => {
               </div>
             ) : (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Company Name <span className="text-red-500">*</span></label>
+                <label htmlFor="companyName" className="block text-sm font-semibold text-gray-800 mb-1.5">Organisation / Business Name <span className="text-red-500">*</span></label>
                 <div className="relative">
                   <Building2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <input
-                    type="text" value={form.companyName} onChange={set('companyName')}
+                    id="companyName" type="text" value={form.companyName} onChange={set('companyName')} onBlur={validateOrganizationOnBlur}
                     className={`w-full pl-9 pr-3 py-2.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent ${fieldErrors.companyName ? 'border-red-300' : 'border-gray-200'}`}
-                    placeholder="Acme Corp"
+                    placeholder="Acme Corp" maxLength={160}
                     required
                     aria-invalid={Boolean(fieldErrors.companyName)}
                     aria-describedby={fieldErrors.companyName ? 'companyName-error' : undefined}
                   />
                 </div>
                 {fieldErrors.companyName && <p id="companyName-error" className="mt-1 text-xs text-red-600">{fieldErrors.companyName}</p>}
+                <p className="mt-1 text-xs text-gray-500">Enter the organisation name associated with your employer account.</p>
               </div>
             )}
 

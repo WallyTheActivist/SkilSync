@@ -30,6 +30,14 @@ Copy-Item .env.example .env
 
 Edit `server/.env` locally and replace the `JWT_SECRET` placeholder with a random value; never commit or share the `.env` file. `JWT_SECRET` is required in every environment and must be at least 32 characters in production. `JWT_EXPIRES_IN` defaults to `7d`. The SQLite file path is resolved relative to the Prisma schema in `server/prisma/`.
 
+### Employer email verification
+
+Employer registration requires SMTP delivery configuration. Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, and `FRONTEND_URL` in the local `server/.env`. For a development test inbox, use a provider such as Mailtrap Email Sandbox and copy the SMTP host, port, username, and password from that sandbox into `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, and `SMTP_PASS`. Do not use real customer addresses or commit provider credentials. `SMTP_SECURE=true` selects implicit TLS (commonly port 465); `false` uses a plaintext connection in development unless the server negotiates STARTTLS. SMTP certificates are always validated; certificate validation is never disabled. `EMAIL_VERIFICATION_TTL_HOURS` defaults to 24.
+
+Production must use a trusted SMTP relay with TLS and credentials stored in the deployment's secret manager. With `SMTP_SECURE=true`, the connection uses implicit TLS; with `false`, the server requires STARTTLS and fails delivery if TLS cannot be negotiated. In either mode, certificate validation remains enabled. Email verification delivery rejects any production `FRONTEND_URL` that is not HTTPS; local development may use localhost HTTP. Verification links use only this configured frontend URL, never the incoming request Host header. An employer account is created unverified and cannot log in or use employer routes until the email link is used. If SMTP is missing or insecure production configuration is supplied, registration reports an explicit configuration error; a delivery outage after account creation requires the user to request a resend when delivery is available.
+
+The migration marks existing employer accounts unverified so each must prove email ownership at their next login. Existing non-employer accounts remain verified. The migration adds columns/tables only; apply it with `npx prisma migrate deploy` after taking the deployment's normal backup.
+
 ## Generate the Client and Apply Migrations
 
 ```powershell
@@ -94,5 +102,6 @@ npm run lint
 - The client API base is `/api`; use the existing Vite proxy in development.
 - Set `CLIENT_URL` to the exact frontend origin used by the server's CORS and unsafe-request origin checks.
 - The server does not send password-reset email. The route stores a hashed token but does not expose it in the response.
+- Employer verification tokens are random, stored only as SHA-256 hashes, and expire after the configured verification lifetime. Resend requests are rate limited and return a non-enumerating response.
 - The server uploads directory is local disk storage. A persistent upload volume or separately hosted file service is not configured here.
 - Do not run `prisma migrate reset` against data that must be retained.

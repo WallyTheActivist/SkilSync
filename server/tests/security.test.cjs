@@ -22,7 +22,7 @@ const employerRoutes = require('../dist/routes/employer').default;
 
 const testUsers = new Map([
   ['student-1', { id: 'student-1', email: 'student@example.com', role: 'STUDENT' }],
-  ['employer-1', { id: 'employer-1', email: 'employer@example.com', role: 'EMPLOYER' }],
+  ['employer-1', { id: 'employer-1', email: 'employer@example.com', role: 'EMPLOYER', emailVerified: true }],
   ['admin-1', { id: 'admin-1', email: 'admin@example.com', role: 'ADMIN' }],
 ]);
 prisma.user.findUnique = async ({ where }) => testUsers.get(where.id) ?? null;
@@ -291,6 +291,7 @@ test('valid login credentials authenticate successfully and invalid credentials 
     id: 'login-test-user',
     email: 'login@example.com',
     role: 'STUDENT',
+    emailVerified: true,
     password: passwordHash,
     studentProfile: null,
     employerProfile: null,
@@ -307,14 +308,120 @@ test('valid login credentials authenticate successfully and invalid credentials 
     const validResponse = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: account.email, password }),
+      body: JSON.stringify({ email: account.email.toUpperCase(), password }),
     });
     assert.equal(validResponse.status, 200);
+    assert.match(validResponse.headers.get('set-cookie'), /ss_token=.*HttpOnly/i);
+    assert.equal((await validResponse.json()).data.user.role, 'STUDENT');
   });
+});
+
+test('verified employers can log in and establish an HttpOnly session', async (t) => {
+  const password = 'Long-enough-test-password-2026';
+  const account = {
+    id: 'verified-employer-login',
+    email: 'verified-employer@example.com',
+    role: 'EMPLOYER',
+    emailVerified: true,
+    password: await hashPassword(password),
+    studentProfile: null,
+    employerProfile: { companyName: 'Synthetic Employer' },
+  };
+
+  await withUserLookup(t, async ({ where }) => (
+    where.email === account.email || where.id === account.id ? account : testUsers.get(where.id) ?? null
+  ), async () => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: account.email, password }),
+    });
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('set-cookie'), /ss_token=.*HttpOnly/i);
+    assert.equal((await response.json()).data.user.role, 'EMPLOYER');
+  });
+});
+
+test('unverified employers cannot log in or receive an authenticated session', async (t) => {
+  const password = 'Long-enough-test-password-2026';
+  const account = {
+    id: 'unverified-employer-login',
+    email: 'unverified-employer@example.com',
+    role: 'EMPLOYER',
+    emailVerified: false,
+    password: await hashPassword(password),
+    studentProfile: null,
+    employerProfile: { companyName: 'Synthetic Employer' },
+  };
+
+  await withUserLookup(t, async ({ where }) => where.email === account.email ? account : null, async () => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: account.email, password }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).code, 'EMAIL_NOT_VERIFIED');
+    assert.equal(response.headers.get('set-cookie'), null);
+  });
+});
+
+test('administrator can log in and use an admin-protected route', async (t) => {
+  const password = 'Long-enough-test-password-2026';
+  const account = {
+    id: 'login-test-admin',
+    email: 'login-admin@example.com',
+    role: 'ADMIN',
+    emailVerified: true,
+    password: await hashPassword(password),
+    studentProfile: null,
+    employerProfile: null,
+  };
+
+  await withUserLookup(t, async ({ where }) => (
+    where.email === account.email || where.id === account.id ? account : testUsers.get(where.id) ?? null
+  ), async () => {
+    const response = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: account.email, password }),
+    });
+    assert.equal(response.status, 200);
+    const sessionCookie = response.headers.get('set-cookie');
+    assert.match(sessionCookie, /ss_token=.*HttpOnly/i);
+    assert.equal((await response.json()).data.user.role, 'ADMIN');
+
+    const protectedResponse = await fetch(`${baseUrl}/admin`, {
+      headers: { Cookie: sessionCookie.split(';')[0] },
+    });
+    assert.equal(protectedResponse.status, 200);
+  });
+});
+
+test('login reports a safe temporary-unavailability message for Prisma schema errors', async (t) => {
+  const original = prisma.user.findUnique;
+  prisma.user.findUnique = async () => {
+    const error = new Error('The column users.emailVerified does not exist.');
+    error.code = 'P2022';
+    throw error;
+  };
+  t.after(() => { prisma.user.findUnique = original; });
+
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'student@example.com', password: 'synthetic-password' }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 503);
+  assert.equal(body.message, 'Login is temporarily unavailable. Please try again.');
+  assert.equal(JSON.stringify(body).includes('emailVerified'), false);
+  assert.equal(response.headers.get('set-cookie'), null);
 });
 
 test('valid registration creates a normal account with a hashed password', async (t) => {
   const originalCreate = prisma.user.create;
+  const originalTransaction = prisma.$transaction;
   let createdData;
   prisma.user.create = async ({ data }) => {
     createdData = data;
@@ -326,7 +433,9 @@ test('valid registration creates a normal account with a hashed password', async
       employerProfile: null,
     };
   };
+  prisma.$transaction = async (callback) => callback({ user: { create: prisma.user.create } });
   t.after(() => { prisma.user.create = originalCreate; });
+  t.after(() => { prisma.$transaction = originalTransaction; });
 
   await withUserLookup(t, async () => null, async () => {
     const response = await fetch(`${baseUrl}/auth/register`, {

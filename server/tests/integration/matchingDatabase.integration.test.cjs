@@ -33,7 +33,10 @@ if (!testDatabaseUrl) {
   let studentUserId;
   let employerUserId;
   let authUserId;
+  let auditUserId;
   let skillId;
+  let matchingInternshipId;
+  let applicationId;
   let createdInternshipId;
   const additionalInternshipIds = [];
   let adminUserId;
@@ -59,20 +62,65 @@ if (!testDatabaseUrl) {
   });
 
   after(async () => {
-    if (adminInternshipId) await prisma.internship.deleteMany({ where: { id: adminInternshipId } });
-    if (createdInternshipId) await prisma.internship.deleteMany({ where: { id: createdInternshipId } });
-    if (additionalInternshipIds.length > 0) {
-      await prisma.internship.deleteMany({ where: { id: { in: additionalInternshipIds } } });
-    }
-    if (adminSkillId) await prisma.skill.deleteMany({ where: { id: adminSkillId } });
-    if (adminUserId) await prisma.user.deleteMany({ where: { id: adminUserId } });
-    if (studentUserId) await prisma.user.deleteMany({ where: { id: studentUserId } });
-    if (employerUserId) await prisma.user.deleteMany({ where: { id: employerUserId } });
-    if (authUserId) await prisma.user.deleteMany({ where: { id: authUserId } });
-    if (skillId) await prisma.skill.deleteMany({ where: { id: skillId } });
-    await new Promise((resolve, reject) => app.server.close((error) => error ? reject(error) : resolve()));
-    await prisma.$disconnect();
-  });
+  // Remove application records before deleting their related users or internships.
+  if (applicationId) {
+    await prisma.application.deleteMany({ where: { id: applicationId } });
+  }
+
+  // Remove internships created by the integration tests.
+  if (adminInternshipId) {
+    await prisma.internship.deleteMany({ where: { id: adminInternshipId } });
+  }
+
+  if (createdInternshipId) {
+    await prisma.internship.deleteMany({ where: { id: createdInternshipId } });
+  }
+
+  if (matchingInternshipId) {
+    await prisma.internship.deleteMany({ where: { id: matchingInternshipId } });
+  }
+
+  if (additionalInternshipIds.length > 0) {
+    await prisma.internship.deleteMany({
+      where: { id: { in: additionalInternshipIds } },
+    });
+  }
+
+  // Remove test skills and users.
+  if (adminSkillId) {
+    await prisma.skill.deleteMany({ where: { id: adminSkillId } });
+  }
+
+  if (auditUserId) {
+    await prisma.user.deleteMany({ where: { id: auditUserId } });
+  }
+
+  if (adminUserId) {
+    await prisma.user.deleteMany({ where: { id: adminUserId } });
+  }
+
+  if (studentUserId) {
+    await prisma.user.deleteMany({ where: { id: studentUserId } });
+  }
+
+  if (employerUserId) {
+    await prisma.user.deleteMany({ where: { id: employerUserId } });
+  }
+
+  if (authUserId) {
+    await prisma.user.deleteMany({ where: { id: authUserId } });
+  }
+
+  if (skillId) {
+    await prisma.skill.deleteMany({ where: { id: skillId } });
+  }
+
+  await new Promise((resolve, reject) =>
+    app.server.close((error) => error ? reject(error) : resolve())
+  );
+
+  await prisma.$disconnect();
+});
 
   const sendRequest = async (path, { method = 'GET', userId, role, body } = {}) => {
     const token = signToken({ userId, email: `${role.toLowerCase()}@skillsync.test`, role });
@@ -111,6 +159,7 @@ if (!testDatabaseUrl) {
         email: employerEmail,
         password: await hashPassword('Synthetic-Employer-Pass-2026!'),
         role: 'EMPLOYER',
+        emailVerified: true,
         employerProfile: { create: { companyName: 'Cape Digital Labs' } },
       },
       include: { employerProfile: true },
@@ -133,6 +182,7 @@ if (!testDatabaseUrl) {
         },
       },
     });
+    matchingInternshipId = internship.id;
 
     await prisma.studentSkill.create({
       data: {
@@ -158,6 +208,7 @@ if (!testDatabaseUrl) {
       },
       include: { studentProfile: true, internship: true },
     });
+    applicationId = application.id;
     assert.equal(application.studentProfile.userId, student.id);
     assert.equal(application.internship.id, internship.id);
     assert.equal(application.status, 'PENDING');
@@ -482,37 +533,67 @@ if (!testDatabaseUrl) {
   });
 
   test('deleting a skill or user preserves recommendations and audit logs without dangling references', async () => {
-    const studentProfile = await prisma.studentProfile.findUnique({ where: { userId: studentUserId } });
-    const recommendation = await prisma.recommendation.create({
-      data: {
-        studentProfileId: studentProfile.id,
-        type: 'skill_gap',
-        title: 'Practice test skill',
-        description: 'Synthetic relation-integrity test.',
-        skillId,
+  // Create a dedicated student account without any applications.
+  const auditStudent = await prisma.user.create({
+    data: {
+      email: `audit-student.${suffix}@skillsync.test`,
+      password: await hashPassword('Synthetic-Audit-Student-Pass-2026!'),
+      role: 'STUDENT',
+      studentProfile: {
+        create: {
+          firstName: 'Audit',
+          lastName: 'Student',
+          university: 'University of Pretoria',
+          degree: 'BSc Information Technology',
+        },
       },
-    });
-    const auditLog = await prisma.auditLog.create({
-      data: {
-        userId: studentUserId,
-        action: 'create',
-        entityType: 'recommendation',
-        entityId: recommendation.id,
-      },
-    });
-
-    await prisma.skill.delete({ where: { id: skillId } });
-    const retainedRecommendation = await prisma.recommendation.findUnique({
-      where: { id: recommendation.id },
-    });
-    assert.equal(retainedRecommendation.skillId, null);
-    skillId = undefined;
-
-    await prisma.user.delete({ where: { id: studentUserId } });
-    const retainedAuditLog = await prisma.auditLog.findUnique({ where: { id: auditLog.id } });
-    assert.equal(retainedAuditLog.userId, null);
-    studentUserId = undefined;
+    },
+    include: { studentProfile: true },
   });
+
+  auditUserId = auditStudent.id;
+
+  const recommendation = await prisma.recommendation.create({
+    data: {
+      studentProfileId: auditStudent.studentProfile.id,
+      type: 'skill_gap',
+      title: 'Practice test skill',
+      description: 'Synthetic relation-integrity test.',
+      skillId,
+    },
+  });
+
+  const auditLog = await prisma.auditLog.create({
+    data: {
+      userId: auditUserId,
+      action: 'create',
+      entityType: 'recommendation',
+      entityId: recommendation.id,
+    },
+  });
+
+  // Deleting the skill should preserve the recommendation
+  // while setting its optional skill reference to null.
+  await prisma.skill.delete({ where: { id: skillId } });
+
+  const retainedRecommendation = await prisma.recommendation.findUnique({
+    where: { id: recommendation.id },
+  });
+
+  assert.equal(retainedRecommendation.skillId, null);
+  skillId = undefined;
+
+  // Deleting the dedicated student should set the audit log's
+  // optional user reference to null.
+  await prisma.user.delete({ where: { id: auditUserId } });
+
+  const retainedAuditLog = await prisma.auditLog.findUnique({
+    where: { id: auditLog.id },
+  });
+
+  assert.equal(retainedAuditLog.userId, null);
+  auditUserId = undefined;
+});
 
   test('database-backed authentication rejects deleted users and stale roles', async () => {
     const user = await prisma.user.create({
@@ -542,7 +623,7 @@ if (!testDatabaseUrl) {
       assert.equal(validResponse.status, 200);
       assert.equal((await validResponse.json()).user.role, 'STUDENT');
 
-      await prisma.user.update({ where: { id: user.id }, data: { role: 'EMPLOYER' } });
+      await prisma.user.update({ where: { id: user.id }, data: { role: 'EMPLOYER', emailVerified: true } });
       const staleRoleResponse = await fetch(`${baseUrl}/student`, {
         headers: { Authorization: `Bearer ${studentToken}` },
       });

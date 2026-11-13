@@ -31,11 +31,20 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
   try {
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, email: true, role: true },
+      select: { id: true, email: true, role: true, emailVerified: true },
     });
 
     if (!user || user.role !== decoded.role) {
       res.status(401).json({ success: false, message: 'Invalid or expired token. Please log in again.' });
+      return;
+    }
+
+    if (user.role === 'EMPLOYER' && !user.emailVerified) {
+      res.status(403).json({
+        success: false,
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Verify your organisation email address before accessing employer features.',
+      });
       return;
     }
 

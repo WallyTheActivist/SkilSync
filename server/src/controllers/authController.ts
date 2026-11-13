@@ -5,28 +5,23 @@ import { signToken } from '../utils/jwt';
 import { clearAuthCookie, setAuthCookie } from '../utils/authCookie';
 import { hashPassword, verifyPassword } from '../utils/password';
 import { getPasswordValidationError } from '../utils/passwordPolicy';
+import { normalizeRegistrationEmail, normalizeRegistrationPersonName } from '../utils/registrationValidation';
+import {
+  EmailDeliveryConfigurationError,
+  getEmailVerificationConfig,
+  getEmailVerificationExpiry,
+  sendVerificationEmail,
+} from '../services/emailVerificationService';
 import { createError } from '../middleware/errorHandler';
+import type { EmailVerificationToken, Prisma } from '@prisma/client';
 
-const hasLetter = /\p{L}/u;
 const meaningfulTextPattern = /^[\p{N}\p{P}\p{S}\p{Zs}\s]+$/u;
+const LOGIN_DATABASE_ERROR_CODES = new Set(['P1000', 'P1001', 'P1002', 'P1003', 'P1008', 'P1010', 'P1017', 'P2021', 'P2022', 'P2024']);
 
-const validatePersonName = (value: unknown, label: string): string => {
-  if (typeof value !== 'string') {
-    throw createError(`${label} must be text.`, 400);
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    throw createError(`${label} is required.`, 400);
-  }
-  if (trimmed.length > 80) {
-    throw createError(`${label} must be between 1 and 80 characters.`, 400);
-  }
-  if (!hasLetter.test(trimmed) || meaningfulTextPattern.test(trimmed)) {
-    throw createError(`${label} must include letters and may contain spaces, apostrophes, hyphens, or periods.`, 400);
-  }
-
-  return trimmed;
+const getLoginDatabaseErrorCode = (error: unknown): string | null => {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return null;
+  const { code } = error as { code?: unknown };
+  return typeof code === 'string' && LOGIN_DATABASE_ERROR_CODES.has(code) ? code : null;
 };
 
 const validateInstitutionName = (value: unknown, label: string): string => {
@@ -48,13 +43,36 @@ const validateInstitutionName = (value: unknown, label: string): string => {
   return trimmed;
 };
 
+const createEmailVerificationToken = async (
+  database: Prisma.TransactionClient,
+  userId: string,
+  tokenHash: string,
+  expiresAt: Date,
+): Promise<EmailVerificationToken> => database.emailVerificationToken.create({
+  data: { userId, tokenHash, expiresAt },
+});
+
+const logEmailDeliveryFailure = (error: unknown, action: string): void => {
+  const errorCode = typeof error === 'object' && error !== null && 'code' in error
+    ? String((error as { code: unknown }).code)
+    : 'unclassified';
+  console.error(`[email-verification] ${action} delivery failed.`, { errorCode });
+};
+
 export const register = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
   try {
     const { email, password, firstName, lastName, role = 'STUDENT', university, companyName } = req.body;
 
-    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
-    const normalizedFirstName = validatePersonName(firstName, 'First name');
-    const normalizedLastName = validatePersonName(lastName, 'Last name');
+    let normalizedEmail: string;
+    let normalizedFirstName: string;
+    let normalizedLastName: string;
+    try {
+      normalizedEmail = normalizeRegistrationEmail(email, role);
+      normalizedFirstName = normalizeRegistrationPersonName(firstName, 'First name');
+      normalizedLastName = normalizeRegistrationPersonName(lastName, 'Last name');
+    } catch (error) {
+      return next(createError(error instanceof Error ? error.message : 'Registration data is invalid.', 400));
+    }
     const normalizedUniversity = role === 'EMPLOYER' || university === undefined
       ? ''
       : validateInstitutionName(university, 'University');
@@ -62,11 +80,6 @@ export const register = async (req: Request, res: Response, next: NextFunction):
 
     if (!normalizedEmail || typeof password !== 'string') {
       return next(createError('Email and password are required.', 400));
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(normalizedEmail)) {
-      return next(createError('Please provide a valid email address.', 400));
     }
 
     const passwordError = getPasswordValidationError(password);
@@ -79,50 +92,104 @@ export const register = async (req: Request, res: Response, next: NextFunction):
       return next(createError('An account with this email already exists.', 409));
     }
 
+    if (role === 'EMPLOYER') {
+      try {
+        getEmailVerificationConfig();
+      } catch (error) {
+        if (error instanceof EmailDeliveryConfigurationError) {
+          res.status(503).json({
+            success: false,
+            code: 'EMAIL_DELIVERY_NOT_CONFIGURED',
+            message: error.message,
+          });
+          return;
+        }
+        throw error;
+      }
+    }
+
     const hashedPassword = await hashPassword(password);
 
-    const user = await prisma.user.create({
-      data: {
-        email: normalizedEmail,
-        password: hashedPassword,
-        role: role === 'EMPLOYER' ? 'EMPLOYER' : 'STUDENT',
-        ...(role === 'EMPLOYER'
-          ? {
-              employerProfile: {
-                create: {
-                  companyName: normalizedCompanyName,
-                  country: 'South Africa',
+    const rawVerificationToken = role === 'EMPLOYER' ? crypto.randomBytes(32).toString('hex') : undefined;
+    const user = await prisma.$transaction(async (transaction) => {
+      const createdUser = await transaction.user.create({
+        data: {
+          email: normalizedEmail,
+          password: hashedPassword,
+          role: role === 'EMPLOYER' ? 'EMPLOYER' : 'STUDENT',
+          emailVerified: role !== 'EMPLOYER',
+          ...(role === 'EMPLOYER'
+            ? {
+                employerProfile: {
+                  create: {
+                    companyName: normalizedCompanyName,
+                    country: 'South Africa',
+                  },
                 },
-              },
-            }
-          : {
-              studentProfile: {
-                create: {
-                  firstName: normalizedFirstName,
-                  lastName: normalizedLastName,
-                  university: normalizedUniversity,
-                  country: 'South Africa',
+              }
+            : {
+                studentProfile: {
+                  create: {
+                    firstName: normalizedFirstName,
+                    lastName: normalizedLastName,
+                    university: normalizedUniversity,
+                    country: 'South Africa',
+                  },
                 },
-              },
-            }),
-      },
-      include: {
-        studentProfile: true,
-        employerProfile: true,
-      },
+              }),
+        },
+        include: {
+          studentProfile: true,
+          employerProfile: true,
+        },
+      });
+
+      if (rawVerificationToken) {
+        await createEmailVerificationToken(
+          transaction,
+          createdUser.id,
+          crypto.createHash('sha256').update(rawVerificationToken).digest('hex'),
+          getEmailVerificationExpiry(),
+        );
+      }
+      return createdUser;
     });
 
-    const token = signToken({ userId: user.id, email: user.email, role: user.role });
-    setAuthCookie(res, token);
+    if (rawVerificationToken) {
+      try {
+        await sendVerificationEmail(user.email, rawVerificationToken);
+      } catch (error) {
+        logEmailDeliveryFailure(error, 'Registration');
+        await prisma.emailVerificationToken.updateMany({
+          where: {
+            userId: user.id,
+            used: false,
+          },
+          data: { used: true },
+        });
+        res.status(503).json({
+          success: false,
+          code: 'EMAIL_DELIVERY_FAILED',
+          message: 'Your account was created, but the verification email could not be delivered. Please try resending later.',
+        });
+        return;
+      }
+    } else {
+      const token = signToken({ userId: user.id, email: user.email, role: user.role });
+      setAuthCookie(res, token);
+    }
 
     res.status(201).json({
       success: true,
-      message: 'Account created successfully.',
+      message: rawVerificationToken
+        ? 'Account created. Verify your organisation email address before signing in.'
+        : 'Account created successfully.',
       data: {
         user: {
           id: user.id,
           email: user.email,
           role: user.role,
+          emailVerified: user.emailVerified,
           profile: user.studentProfile || user.employerProfile,
         },
       },
@@ -154,6 +221,15 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
       return next(createError('Invalid email or password.', 401));
     }
 
+    if (user.role === 'EMPLOYER' && !user.emailVerified) {
+      res.status(403).json({
+        success: false,
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Verify your organisation email address before signing in.',
+      });
+      return;
+    }
+
     const token = signToken({ userId: user.id, email: user.email, role: user.role });
     setAuthCookie(res, token);
 
@@ -165,11 +241,19 @@ export const login = async (req: Request, res: Response, next: NextFunction): Pr
           id: user.id,
           email: user.email,
           role: user.role,
+          emailVerified: user.emailVerified,
           profile: user.studentProfile || user.employerProfile,
         },
       },
     });
   } catch (err) {
+    const errorCode = getLoginDatabaseErrorCode(err);
+    if (errorCode) {
+      if (process.env.NODE_ENV !== 'test') {
+        console.error('[auth] Login database query failed.', { errorCode });
+      }
+      return next(createError('Login is temporarily unavailable. Please try again.', 503));
+    }
     next(err);
   }
 };
@@ -192,6 +276,7 @@ export const getMe = async (req: Request & { user?: { userId: string } }, res: R
         id: user.id,
         email: user.email,
         role: user.role,
+        emailVerified: user.emailVerified,
         profile: user.studentProfile || user.employerProfile,
       },
     });

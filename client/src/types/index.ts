@@ -16,6 +16,42 @@ export type ApplicationStatus =
 
 export type InternshipStatus = 'DRAFT' | 'ACTIVE' | 'CLOSED' | 'FILLED';
 
+export type BackupValidationStatus = 'passed' | 'failed' | 'unknown';
+export type BackupCreationResult = 'running' | 'succeeded' | 'failed' | 'unknown';
+export type CloudSynchronizationStatus =
+  | 'not_configured'
+  | 'configured_but_unavailable'
+  | 'local_sync_folder_detected'
+  | 'backup_copied_to_sync_folder'
+  | 'not_independently_verified';
+
+export interface AdminBackup {
+  id: string;
+  filename: string | null;
+  sha256?: string | null;
+  createdAt: string;
+  sizeBytes: number;
+  backupType: 'database';
+  validationStatus: BackupValidationStatus;
+  validationDetails: string;
+  localStorageStatus: 'available' | 'missing';
+  cloudSynchronizationStatus: CloudSynchronizationStatus;
+  creationResult: BackupCreationResult;
+}
+
+export interface AdminBackupStatus {
+  localStorageConfigured: boolean;
+  localStorageDirectoryExists: boolean;
+  localStorageWritable: boolean;
+  cloudSyncConfigured: boolean;
+  localSyncFolderDetected: boolean;
+  latestBackupCopiedToSyncFolder: boolean;
+  cloudSyncVerified: false;
+  cloudSyncStatus: CloudSynchronizationStatus;
+  latestBackupDate: string | null;
+  latestBackupFile: string | null;
+}
+
 export type SkillCategory =
   | 'PROGRAMMING'
   | 'FRAMEWORK'
@@ -34,6 +70,7 @@ export interface User {
   id: string;
   email: string;
   role: Role;
+  emailVerified: boolean;
   profile: StudentProfile | EmployerProfile | null;
 }
 
@@ -138,6 +175,7 @@ export interface Application {
   notes?: string;
   appliedAt: string;
   updatedAt: string;
+  closedAt: string | null;
   internship: Internship;
 }
 
@@ -308,6 +346,8 @@ export interface ApplicationWithStudent {
   notes?: string;
   appliedAt: string;
   updatedAt: string;
+  closedAt: string | null;
+  internship?: Pick<Internship, 'title'>;
   studentProfile: StudentProfile & {
     studentSkills?: StudentSkill[];
     _count?: { applications: number; studentSkills: number };

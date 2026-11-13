@@ -79,6 +79,7 @@ const setupInternship = (testContext, { owned = true, failCreateMany = false, in
     id: 'employer-user-test-001',
     email: 'employer@skillsync.test',
     role: 'EMPLOYER',
+    emailVerified: true,
   }));
   mockMethod(testContext, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(testContext, prisma.skill, 'findMany', async ({ where }) => (
@@ -204,6 +205,7 @@ test('employer internship listing still honors requested pagination', async (t) 
     id: 'employer-user-test-001',
     email: 'employer@skillsync.test',
     role: 'EMPLOYER',
+    emailVerified: true,
   }));
   mockMethod(t, prisma.employerProfile, 'findUnique', async () => ({ id: 'employer-profile-test-001' }));
   mockMethod(t, prisma.internship, 'findMany', async (args) => {

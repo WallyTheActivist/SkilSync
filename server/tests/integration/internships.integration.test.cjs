@@ -138,6 +138,7 @@ test('does not grant employers student-only match-score access', async (t) => {
     id: 'employer-user-test-001',
     email: 'employer@skillsync.test',
     role: 'EMPLOYER',
+    emailVerified: true,
   }));
 
   const { response, body } = await getMatchScore(detail.id, tokenFor('EMPLOYER'));

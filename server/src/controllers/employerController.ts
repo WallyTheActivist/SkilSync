@@ -295,6 +295,9 @@ export const deleteInternship = async (req: AuthRequest, res: Response, next: Ne
     await prisma.internship.delete({ where: { id: internship.id } });
     res.json({ success: true, message: 'Internship deleted.' });
   } catch (err) {
+    if (isPrismaForeignKeyConstraintError(err)) {
+      return next(createError('This internship has application history and cannot be permanently deleted.', 409));
+    }
     next(err);
   }
 };
@@ -314,6 +317,8 @@ export const getApplicants = async (req: AuthRequest, res: Response, next: NextF
     const where: Record<string, unknown> = {
       internshipId: internship.id,
       ...(status && { status: String(status) }),
+      ...(req.query.lifecycle === 'open' && { closedAt: null }),
+      ...(req.query.lifecycle === 'closed' && { closedAt: { not: null } }),
     };
 
     const applications = await prisma.application.findMany({
@@ -324,11 +329,47 @@ export const getApplicants = async (req: AuthRequest, res: Response, next: NextF
             studentSkills: { include: { skill: true } },
           },
         },
+        internship: { select: { title: true } },
       },
       orderBy: { matchScore: 'desc' },
     });
 
     res.json({ success: true, data: applications });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── PATCH /employer/applications/:id/close ───────────────────────────────────
+export const closeApplication = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const profile = await resolveProfile(req, next);
+    if (!profile) return;
+
+    const application = await prisma.application.findUnique({
+      where: { id: req.params.id },
+      include: { internship: true },
+    });
+
+    if (!application) return next(createError('Application not found.', 404));
+    if (application.internship.employerProfileId !== profile.id) {
+      return next(createError('Not authorized to close this application.', 403));
+    }
+
+    if (application.closedAt) {
+      res.json({ success: true, message: 'Application is already closed.', data: application });
+      return;
+    }
+
+    await prisma.application.updateMany({
+      where: { id: application.id, closedAt: null },
+      data: { closedAt: new Date() },
+    });
+
+    const updated = await prisma.application.findUnique({ where: { id: application.id } });
+    if (!updated) return next(createError('Application not found.', 404));
+
+    res.json({ success: true, message: 'Application closed and archived.', data: updated });
   } catch (err) {
     next(err);
   }

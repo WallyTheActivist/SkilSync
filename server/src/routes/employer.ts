@@ -10,7 +10,7 @@ import {
 import {
   getProfile, updateProfile, uploadLogo,
   getMyInternships, getMyInternship, createInternship, updateInternship, deleteInternship,
-  getApplicants, updateApplicationStatus, getDashboardStats,
+  getApplicants, updateApplicationStatus, closeApplication, getDashboardStats,
 } from '../controllers/employerController';
 
 const router = Router();
@@ -109,9 +109,11 @@ router.delete('/internships/:id', [idParam(), validateRequest], deleteInternship
 router.get('/internships/:id/applicants', [
   idParam(),
   optionalQueryEnum('status', ['PENDING', 'UNDER_REVIEW', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN']),
+  optionalQueryEnum('lifecycle', ['open', 'closed']),
   validateRequest,
 ], getApplicants);
 
+router.patch('/applications/:id/close', [idParam(), validateRequest], closeApplication);
 router.patch('/applications/:id/status', [
   idParam(),
   body('status').isIn(['PENDING', 'UNDER_REVIEW', 'SHORTLISTED', 'INTERVIEW_SCHEDULED', 'OFFERED', 'ACCEPTED', 'REJECTED']).withMessage('status is invalid.'),

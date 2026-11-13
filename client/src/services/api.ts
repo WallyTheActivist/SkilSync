@@ -26,6 +26,8 @@ import type {
   AdminSkill,
   ReadinessBreakdown,
   ApplicationStatus,
+  AdminBackup,
+  AdminBackupStatus,
 } from '../types';
 
 const api = axios.create({
@@ -60,6 +62,12 @@ export const authApi = {
 
   login: (email: string, password: string) =>
     api.post<ApiResponse<{ user: User }>>('/auth/login', { email, password }),
+
+  verifyEmail: (token: string) =>
+    api.post<ApiResponse<null>>('/auth/verify-email', { token }),
+
+  resendVerification: (email: string) =>
+    api.post<ApiResponse<null>>('/auth/resend-verification', { email }),
 
   logout: () => api.post<ApiResponse<null>>('/auth/logout'),
 
@@ -175,12 +183,14 @@ export const employerApi = {
     api.put<ApiResponse<Internship>>(`/employer/internships/${id}`, data),
   deleteInternship: (id: string) =>
     api.delete(`/employer/internships/${id}`),
-  getApplicants: (internshipId: string, status?: string) =>
+  getApplicants: (internshipId: string, status?: string, lifecycle?: 'open' | 'closed') =>
     api.get<ApiResponse<ApplicationWithStudent[]>>(`/employer/internships/${internshipId}/applicants`, {
-      params: { status },
+      params: { status, lifecycle },
     }),
   updateApplicationStatus: (applicationId: string, status: ApplicationStatus, notes?: string) =>
     api.patch<ApiResponse<Application>>(`/employer/applications/${applicationId}/status`, { status, notes }),
+  closeApplication: (applicationId: string) =>
+    api.patch<ApiResponse<Application>>(`/employer/applications/${applicationId}/close`),
 };
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
@@ -210,6 +220,13 @@ export const adminApi = {
   updateSkill: (id: string, data: { name?: string; category?: string; description?: string }) =>
     api.put<ApiResponse<Skill>>(`/admin/skills/${id}`, data),
   deleteSkill: (id: string) => api.delete(`/admin/skills/${id}`),
+
+  getBackups: () =>
+    api.get<ApiResponse<{ backups: AdminBackup[]; total: number; status: AdminBackupStatus }>>('/admin/backups'),
+  createBackup: () =>
+    api.post<ApiResponse<{ backup: AdminBackup }>>('/admin/backups'),
+  downloadBackup: (id: string) =>
+    api.get(`/admin/backups/${encodeURIComponent(id)}/download`, { responseType: 'blob' }),
 };
 
 export default api;

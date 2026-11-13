@@ -12,12 +12,16 @@
 
 | Method and path | Access | Purpose and notes |
 |---|---|---|
-| `POST /api/auth/register` | Public | Creates a student or employer account. Requires at least 12 characters with uppercase, lowercase, a number, and a special character; passwords are limited to 72 characters and 72 UTF-8 bytes. Public registration cannot create admins. Sets an HttpOnly session cookie. |
-| `POST /api/auth/login` | Public | Verifies the password and sets the session cookie. |
+| `POST /api/auth/register` | Public | Creates a student or employer account. Requires at least 12 characters with uppercase, lowercase, a number, and a special character; passwords are limited to 72 characters and 72 UTF-8 bytes. Public registration cannot create admins. Student accounts are verified immediately and receive an HttpOnly session cookie. Employer accounts remain unverified and receive no session cookie until they verify ownership through email. |
+| `POST /api/auth/login` | Public | Verifies the password and sets the session cookie. Unverified employers receive `403 EMAIL_NOT_VERIFIED` and no cookie. |
 | `POST /api/auth/logout` | Public | Clears the session cookie. |
-| `GET /api/auth/me` | Authenticated | Returns the current user and profile. |
+| `GET /api/auth/me` | Authenticated | Returns the current user, `emailVerified` status, and profile. |
+| `POST /api/auth/verify-email` | Public, rate limited | Accepts the emailed token in the request body, verifies and consumes it, and marks the employer account verified. |
+| `POST /api/auth/resend-verification` | Public, rate limited | Accepts an email and returns a generic acknowledgement to avoid account enumeration. |
 | `POST /api/auth/forgot-password` | Public | Accepts an email and returns a non-enumerating acknowledgement. A token hash is stored when the account exists; no email provider is configured, and no raw token is returned. |
 | `POST /api/auth/reset-password` | Public | Consumes a valid unexpired reset token and updates the password using the same complexity and bcrypt length limits as registration. The token delivery flow is not configured. |
+
+Employer registration and verification email delivery require the SMTP configuration described in the [installation guide](./installation.md#employer-email-verification). Verification links expire after the configured lifetime (24 hours by default); tokens are stored as SHA-256 hashes, never returned by API responses, and invalidated on use or successful resend. Employer authentication middleware rechecks verification status from the database, including for previously issued sessions.
 
 ## Student: `/api/student`
 
@@ -75,11 +79,14 @@ All routes require `EMPLOYER` authentication; posting/applicant operations are s
 | `GET /api/employer/internships` | List own postings; optional status/page/limit filters. |
 | `POST /api/employer/internships` | Create a posting and required-skill links. |
 | `PUT /api/employer/internships/:id` | Update own posting and, when supplied, its required-skill links. |
-| `DELETE /api/employer/internships/:id` | Delete own posting. |
-| `GET /api/employer/internships/:id/applicants` | List applicants for own posting; optional status filter; results are ordered by match score. |
+| `DELETE /api/employer/internships/:id` | Delete own posting only when it has no application history; otherwise returns `409`. |
+| `GET /api/employer/internships/:id/applicants` | List applicants for own posting; optional decision-status and lifecycle (`open`/`closed`) filters; results are ordered by match score. |
 | `PATCH /api/employer/applications/:id/status` | Update status/notes for an application to own posting. |
+| `PATCH /api/employer/applications/:id/close` | Archive an application for the owning employer without changing its decision or deleting its record. Repeated closes are safe. |
 
 The status accepted by this endpoint is one of `PENDING`, `UNDER_REVIEW`, `SHORTLISTED`, `INTERVIEW_SCHEDULED`, `OFFERED`, `ACCEPTED`, or `REJECTED`. Student withdrawal is a separate application endpoint.
+
+Application lifecycle is independent from its decision status. The nullable `closedAt` field is `null` for open applications and populated for employer-archived applications. Archived records are retained for review; reopening is not currently supported so the closure timestamp is not erased. Students continue to see the same application and decision. Permanent deletion of internships or users that have application history is blocked to preserve application records.
 
 ## Administration: `/api/admin`
 
@@ -91,10 +98,10 @@ All routes require `ADMIN` authentication.
 | `GET /api/admin/analytics` | Top internships/skills, match-score aggregates, and a 30-day application trend. This powers the current Admin Analytics page. |
 | `GET /api/admin/students` | Search and paginate student accounts. |
 | `GET /api/admin/employers` | Search and paginate employer accounts. |
-| `DELETE /api/admin/users/:id` | Delete a non-admin user. Admin accounts cannot be deleted through this endpoint. |
+| `DELETE /api/admin/users/:id` | Delete a non-admin user only when no application history references it; otherwise returns `409`. |
 | `GET /api/admin/internships` | Search/filter and paginate internships. |
 | `PATCH /api/admin/internships/:id` | Update selected internship status/title/description. |
-| `DELETE /api/admin/internships/:id` | Delete an internship. |
+| `DELETE /api/admin/internships/:id` | Delete an internship only when it has no application history; otherwise returns `409`. |
 | `GET /api/admin/applications` | Filter and paginate applications. |
 | `GET /api/admin/skills` | Search/filter the skills catalogue. |
 | `POST /api/admin/skills` | Create a skill. |

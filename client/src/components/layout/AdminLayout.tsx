@@ -12,6 +12,7 @@ const PAGE_TITLES: Record<string, string> = {
   '/admin/skills': 'Skills Catalogue',
   '/admin/applications': 'Applications',
   '/admin/reports': 'Reports & Analytics',
+  '/admin/backups': 'Backup & Recovery',
 };
 
 export const AdminLayout: React.FC = () => {
